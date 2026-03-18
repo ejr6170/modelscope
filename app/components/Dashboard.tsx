@@ -1614,10 +1614,12 @@ function SettingSlider({ value, min, max, step, label, onChange }: { value: numb
   );
 }
 
-function StatusBar({ connected, onOpenSettings, activeView, onViewChange }: { connected: boolean; onOpenSettings: () => void; activeView: string; onViewChange: (v: string) => void }) {
-  const winMinimize = () => { (window as unknown as Record<string, { minimize: () => void }>).electronAPI?.minimize(); };
-  const winToggleMax = () => { (window as unknown as Record<string, { toggleMaximize: () => void }>).electronAPI?.toggleMaximize(); };
-  const winClose = () => { (window as unknown as Record<string, { close: () => void }>).electronAPI?.close(); };
+function StatusBar({ connected, onOpenSettings, activeView, onViewChange, updateStatus }: { connected: boolean; onOpenSettings: () => void; activeView: string; onViewChange: (v: string) => void; updateStatus: string }) {
+  const eApi = () => (window as unknown as Record<string, Record<string, (...args: unknown[]) => void>>).electronAPI;
+  const winMinimize = () => { eApi()?.minimize(); };
+  const winToggleMax = () => { eApi()?.toggleMaximize(); };
+  const winClose = () => { eApi()?.close(); };
+  const installUpdate = () => { eApi()?.installUpdate(); };
 
   return (
     <div className="drag-region flex items-center px-4 py-0 border-b border-white/[0.05] shrink-0"
@@ -1631,6 +1633,11 @@ function StatusBar({ connected, onOpenSettings, activeView, onViewChange }: { co
         </div>
         <div className={`w-[5px] h-[5px] rounded-full transition-all duration-500 ${connected ? "bg-indigo-400 animate-live-pulse" : "bg-white/15"}`} />
         <span className="text-[7px] font-mono text-txt-tertiary">v1.0</span>
+        {updateStatus === "ready" && (
+          <button onClick={installUpdate} className="no-drag ml-1 px-1.5 py-0.5 rounded-full bg-indigo-500/25 border border-indigo-400/30 text-[7px] font-mono text-indigo-300 hover:bg-indigo-500/40 transition-all animate-live-pulse" title="Click to install update and restart">
+            UPDATE READY
+          </button>
+        )}
       </div>
       <div className="flex-1 flex justify-center">
         <div className="no-drag flex items-center gap-0.5 px-1.5 py-0.5 rounded-full border border-white/[0.08]" style={{ background: "rgba(255,255,255,0.04)", backdropFilter: "blur(12px)" }}>
@@ -1692,6 +1699,7 @@ export default function Dashboard() {
   const [highlightedCardId, setHighlightedCardId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [activeView, setActiveView] = useState("feed");
+  const [updateStatus, setUpdateStatus] = useState("idle");
   const [fileTargets, setFileTargets] = useState<Record<string, "neutral" | "snipe" | "focus">>({});
   const [settings, updateSettings, resetSettings] = useSettings();
   const feedRef = useRef<HTMLDivElement>(null);
@@ -1718,6 +1726,11 @@ export default function Dashboard() {
   const dismissError = useCallback((id: string) => {
     setPinnedErrors(prev => prev.filter(e => e.id !== id));
     socketRef.current?.emit("dismiss_error", id);
+  }, []);
+
+  useEffect(() => {
+    const api = (window as unknown as Record<string, Record<string, (cb: (s: string) => void) => void>>).electronAPI;
+    api?.onUpdateStatus?.((status: string) => setUpdateStatus(status));
   }, []);
 
   const switchProject = useCallback((projectId: string) => {
@@ -1806,7 +1819,7 @@ export default function Dashboard() {
            WebkitBackdropFilter: settings.blurIntensity === "none" ? "none" : `blur(${settings.blurIntensity === "high" ? 60 : 25}px) saturate(160%)`,
            boxShadow: "var(--glass-glow), 0 25px 50px -12px rgba(0,0,0,0.5)",
          }}>
-      <StatusBar connected={connected} onOpenSettings={() => setSettingsOpen(true)} activeView={activeView} onViewChange={setActiveView} />
+      <StatusBar connected={connected} onOpenSettings={() => setSettingsOpen(true)} activeView={activeView} onViewChange={setActiveView} updateStatus={updateStatus} />
 
       <div className="flex-1 flex min-h-0 h-full">
         <div className="w-[180px] shrink-0 h-full border-r border-white/[0.10] p-0 m-0 relative z-10"
