@@ -122,7 +122,7 @@ function eventToCards(event: SessionEvent): FeedCard[] {
     event.toolResults?.filter(tr => tr.isError).forEach(tr =>
       cards.push({ id: `${event.uuid}-e-${tr.toolUseId}`, kind: "error", timestamp: ts, text: tr.content, isError: true, isNested: nested })
     );
-    const text = (event as Record<string, unknown>).text as string | undefined;
+    const text = (event as unknown as Record<string, unknown>).text as string | undefined;
     if (text) { const cleaned = text.replace(/<[^>]+>/g, "").trim(); if (cleaned && !cleaned.startsWith("[Request") && cleaned.length > 2) cards.push({ id: `${event.uuid}-u`, kind: "user", timestamp: ts, text: cleaned }); }
   }
   return cards;
@@ -903,7 +903,7 @@ function relativeTime(isoStr: string | null): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-function LeftSidebar({ projects, activeProjectId, onSelect, cards, onJumpToCard, onSetTab, fileTargets }: { projects: ProjectInfo[]; activeProjectId: string | null; onSelect: (id: string) => void; cards: FeedCard[]; onJumpToCard: (cardId: string) => void; onSetTab?: (tab: "projects" | "knowledge") => void; fileTargets?: Record<string, string> }) {
+function LeftSidebar({ projects, activeProjectId, onSelect, cards, onJumpToCard, onSetTab, fileTargets }: { projects: ProjectInfo[]; activeProjectId: string | null; onSelect: (id: string) => void; cards: FeedCard[]; onJumpToCard: (cardId: string) => void; onSetTab?: (setter: (tab: "projects" | "knowledge") => void) => void; fileTargets?: Record<string, string> }) {
   const [tab, setTab] = useState<"projects" | "knowledge">("projects");
   const [search, setSearch] = useState("");
 
@@ -915,7 +915,7 @@ function LeftSidebar({ projects, activeProjectId, onSelect, cards, onJumpToCard,
 
   const knowledgeBank = useMemo(() => detectConceptsFromCards(cards), [cards]);
 
-  useEffect(() => { if (onSetTab) onSetTab(setTab as unknown as (tab: "projects" | "knowledge") => void); }, [onSetTab]);
+  useEffect(() => { if (onSetTab) onSetTab(setTab); }, [onSetTab]);
 
   return (
     <div className="w-full h-full flex flex-col overflow-hidden"
@@ -1578,7 +1578,7 @@ function SettingsModal({ settings, onUpdate, onReset, onClose }: {
 
               {activeTab === "behavior" && (
                 <div className="space-y-4">
-                  <SettingToggle label="Always on Top" value={settings.alwaysOnTop} onChange={v => { onUpdate({ alwaysOnTop: v }); (window as Record<string, unknown>).electronAPI && (window as Record<string, { setAlwaysOnTop: (v: boolean) => void }>).electronAPI.setAlwaysOnTop(v); }} />
+                  <SettingToggle label="Always on Top" value={settings.alwaysOnTop} onChange={v => { onUpdate({ alwaysOnTop: v }); (window as unknown as Record<string, Record<string, (v: boolean) => void>>).electronAPI?.setAlwaysOnTop(v); }} />
                 </div>
               )}
             </motion.div>
