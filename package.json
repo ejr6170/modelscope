@@ -1,0 +1,34 @@
+{
+  "name": "ghost-hud",
+  "version": "0.1.0",
+  "description": "Real-time Claude Code session observatory",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "parse": "node src/parser.js",
+    "server": "node server.js",
+    "dev": "next dev --port 3777",
+    "build": "next build",
+    "electron": "electron .",
+    "start": "concurrently \"npm run server\" \"npm run dev\" \"sleep 3 && npm run electron\""
+  },
+  "dependencies": {
+    "chokidar": "^4.0.3",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "framer-motion": "^11.0.0",
+    "socket.io": "^4.8.0",
+    "socket.io-client": "^4.8.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/react": "^19.0.0",
+    "@types/node": "^22.0.0",
+    "tailwindcss": "^3.4.0",
+    "postcss": "^8.4.0",
+    "autoprefixer": "^10.4.0",
+    "electron": "^33.0.0",
+    "concurrently": "^9.0.0"
+  }
+}
