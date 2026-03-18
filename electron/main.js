@@ -69,7 +69,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
     },
   });
 
@@ -92,10 +92,6 @@ function createWindow() {
     const appPath = app.getAppPath();
     const indexPath = path.join(appPath, "out", "index.html");
     mainWindow.loadFile(indexPath);
-  }
-
-  if (isDev) {
-    mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 
   setupAutoUpdater();
