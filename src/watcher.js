@@ -4,9 +4,8 @@ import os from "os";
 import { findNewestSession, parseLine, extractEvent } from "./parser.js";
 
 const claudeDir = path.join(os.homedir(), ".claude");
-const POLL_INTERVAL = 500; // ms — fallback if chokidar unavailable
+const POLL_INTERVAL = 500;
 
-// ── State ───────────────────────────────────────────────────────
 let currentFile = null;
 let fileOffset = 0;
 let sessionTokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -14,7 +13,6 @@ let sessionCost = 0;
 let turnCount = 0;
 let startTime = Date.now();
 
-// ── ANSI colors ─────────────────────────────────────────────────
 const c = {
   reset: "\x1b[0m",
   dim: "\x1b[2m",
@@ -32,7 +30,7 @@ const c = {
 function clearAndHeader() {
   process.stdout.write("\x1b[2J\x1b[H");
   console.log(`${c.dim}${c.cyan}╔══════════════════════════════════════════════════════╗${c.reset}`);
-  console.log(`${c.dim}${c.cyan}║${c.reset}  ${c.bold}${c.cyan}GHOST HUD${c.reset}  ${c.dim}— Live Session Observer${c.reset}               ${c.dim}${c.cyan}║${c.reset}`);
+  console.log(`${c.dim}${c.cyan}║${c.reset}  ${c.bold}${c.cyan}MODELSCOPE${c.reset}  ${c.dim}— Live Session Observer${c.reset}              ${c.dim}${c.cyan}║${c.reset}`);
   console.log(`${c.dim}${c.cyan}╚══════════════════════════════════════════════════════╝${c.reset}`);
 }
 
@@ -51,7 +49,6 @@ function printEvent(event) {
   const time = event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : "??:??:??";
 
   if (event.role === "assistant") {
-    // Thinking
     if (event.thinking?.length) {
       const thought = event.thinking[0].slice(0, 120);
       if (thought) {
@@ -59,13 +56,11 @@ function printEvent(event) {
       }
     }
 
-    // Text response
     if (event.text?.length) {
       const text = event.text.join(" ").slice(0, 150);
       console.log(` ${c.dim}${time}${c.reset} ${c.green}REPLY${c.reset} ${text}`);
     }
 
-    // Tool use
     if (event.toolUses?.length) {
       for (const tool of event.toolUses) {
         const input = tool.input ? JSON.stringify(tool.input).slice(0, 80) : "";
@@ -73,7 +68,6 @@ function printEvent(event) {
       }
     }
 
-    // Update running totals
     if (event.tokens) {
       sessionTokens.input += event.tokens.input;
       sessionTokens.output += event.tokens.output;
@@ -92,7 +86,6 @@ function printEvent(event) {
   }
 }
 
-// ── Read new lines from the file ────────────────────────────────
 function readNewLines(filePath) {
   const stat = fs.statSync(filePath);
   if (stat.size <= fileOffset) return;
@@ -112,7 +105,6 @@ function readNewLines(filePath) {
   }
 }
 
-// ── Session discovery loop ──────────────────────────────────────
 function discoverAndWatch() {
   const session = findNewestSession(claudeDir);
   if (!session) {
@@ -139,7 +131,6 @@ function discoverAndWatch() {
   printMetricsBar();
 }
 
-// ── Main: try chokidar, fall back to polling ────────────────────
 async function main() {
   clearAndHeader();
   console.log(`\n ${c.dim}Scanning ${claudeDir}/projects for sessions...${c.reset}\n`);
@@ -148,10 +139,8 @@ async function main() {
     const chokidar = await import("chokidar");
     const projectsDir = path.join(claudeDir, "projects");
 
-    // Initial load
     discoverAndWatch();
 
-    // Watch for file changes
     const watcher = chokidar.watch(projectsDir, {
       ignoreInitial: true,
       depth: 2,
@@ -161,10 +150,9 @@ async function main() {
     watcher.on("change", (changedPath) => {
       if (!changedPath.endsWith(".jsonl")) return;
 
-      // If a newer session appeared, switch to it
       const session = findNewestSession(claudeDir);
       if (session && session.path !== currentFile) {
-        currentFile = null; // force rediscovery
+        currentFile = null;
       }
 
       discoverAndWatch();

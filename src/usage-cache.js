@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-const CACHE_FILE = path.join(os.homedir(), ".claude", "ghost-hud-usage.json");
+const CACHE_FILE = path.join(os.homedir(), ".claude", "modelscope-usage.json");
 
 const DEFAULT_USAGE = {
   sessionPercent: null,

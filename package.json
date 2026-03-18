@@ -1,5 +1,5 @@
 {
-  "name": "ghost-hud",
+  "name": "modelscope",
   "version": "1.0.0",
   "description": "Real-time Claude Code session observatory",
   "type": "module",
@@ -11,30 +11,38 @@
     "build": "next build",
     "electron": "electron .",
     "start": "concurrently \"npm run server\" \"npm run dev\" \"sleep 3 && npm run electron\"",
-    "dist": "next build && electron-builder --publish never",
+    "dist": "next build && electron-builder",
     "release": "next build && electron-builder --publish always"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/ejr6170/modelscope.git"
   },
+  "homepage": "https://github.com/ejr6170/modelscope",
   "build": {
     "appId": "com.modelscope.app",
     "productName": "ModelScope",
+    "directories": {
+      "output": "ModelScope-Build"
+    },
     "files": [
       "electron/**/*",
-      "server.js",
-      "src/**/*",
-      ".next/**/*",
+      "out/**/*",
       "public/**/*",
-      "app/**/*",
-      "next.config.js",
       "package.json"
     ],
     "extraResources": [
       {
         "from": "public/logo.png",
         "to": "logo.png"
+      },
+      {
+        "from": "server.js",
+        "to": "server.js"
+      },
+      {
+        "from": "src",
+        "to": "src"
       }
     ],
     "win": {

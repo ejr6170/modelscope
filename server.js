@@ -629,7 +629,7 @@ function sendProjectState(socket, projectId) {
 }
 
 io.on("connection", (socket) => {
-  console.log(`[ghost-hud] Client connected: ${socket.id}`);
+  console.log(`[modelscope] Client connected: ${socket.id}`);
 
   const initialProject = globalActiveProjectId;
   socketActiveProject.set(socket.id, initialProject);
@@ -642,7 +642,7 @@ io.on("connection", (socket) => {
   }
 
   socket.on("switch_project", (projectId) => {
-    console.log(`[ghost-hud] ${socket.id} switching to project: ${projectId}`);
+    console.log(`[modelscope] ${socket.id} switching to project: ${projectId}`);
     socketActiveProject.set(socket.id, projectId);
 
     socket.emit("session", null);
@@ -667,12 +667,12 @@ io.on("connection", (socket) => {
       const projectState = getOrCreateProjectState(activeProj);
       projectState.metrics = createFreshMetrics();
       emitToProjectViewers(activeProj, "metrics", buildMetricsPayload(activeProj));
-      console.log(`[ghost-hud] Stats reset for ${activeProj}`);
+      console.log(`[modelscope] Stats reset for ${activeProj}`);
     }
   });
 
   socket.on("disconnect", () => {
-    console.log(`[ghost-hud] Client disconnected: ${socket.id}`);
+    console.log(`[modelscope] Client disconnected: ${socket.id}`);
     socketActiveProject.delete(socket.id);
   });
 });
@@ -713,14 +713,14 @@ async function startWatching() {
       }
     });
 
-    console.log(`[ghost-hud] Watching all projects with chokidar (depth: 3)`);
+    console.log(`[modelscope] Watching all projects with chokidar (depth: 3)`);
   } catch {
-    console.log(`[ghost-hud] Polling all projects every 500ms`);
+    console.log(`[modelscope] Polling all projects every 500ms`);
     setInterval(checkAllProjects, 500);
   }
 }
 
 httpServer.listen(PORT, () => {
-  console.log(`[ghost-hud] Socket.io server on http://localhost:${PORT}`);
+  console.log(`[modelscope] Socket.io server on http://localhost:${PORT}`);
   startWatching();
 });

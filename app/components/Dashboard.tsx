@@ -1458,7 +1458,7 @@ function useSettings(): [HudSettings, (patch: Partial<HudSettings>) => void, () 
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("ghost-hud-settings");
+      const saved = localStorage.getItem("modelscope-settings");
       if (saved) setSettings(prev => ({ ...prev, ...JSON.parse(saved) }));
     } catch {}
   }, []);
@@ -1466,14 +1466,14 @@ function useSettings(): [HudSettings, (patch: Partial<HudSettings>) => void, () 
   const update = useCallback((patch: Partial<HudSettings>) => {
     setSettings(prev => {
       const next = { ...prev, ...patch };
-      try { localStorage.setItem("ghost-hud-settings", JSON.stringify(next)); } catch {}
+      try { localStorage.setItem("modelscope-settings", JSON.stringify(next)); } catch {}
       return next;
     });
   }, []);
 
   const reset = useCallback(() => {
     setSettings(DEFAULT_SETTINGS);
-    try { localStorage.removeItem("ghost-hud-settings"); } catch {}
+    try { localStorage.removeItem("modelscope-settings"); } catch {}
   }, []);
 
   return [settings, update, reset];
@@ -1626,7 +1626,7 @@ function StatusBar({ connected, onOpenSettings, activeView, onViewChange, update
          style={{ background: "var(--header-bg)", backdropFilter: "blur(40px) saturate(160%)" }}>
       <div className="flex items-center gap-2 no-drag py-1.5">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.png" alt="ModelScope" className="h-6 w-6 rounded-md" style={{ filter: "drop-shadow(0 0 8px rgba(99, 102, 241, 0.4))" }} />
+        <img src="./logo.png" alt="ModelScope" className="h-6 w-6 rounded-md" style={{ filter: "drop-shadow(0 0 8px rgba(99, 102, 241, 0.4))" }} />
         <div className="flex items-center gap-0.5">
           <span className="text-[10px] font-sans font-black text-txt-primary tracking-tight">Model</span>
           <span className="text-[10px] font-sans font-light text-indigo-300/80 tracking-tight">Scope</span>
