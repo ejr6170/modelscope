@@ -6,35 +6,37 @@ ModelScope monitors Claude Code sessions at the token/cost/tool level but has no
 
 ## Solution
 
-Add hardware usage metrics to ModelScope in two places: a compact always-visible summary pinned to the bottom of the right sidebar, and a full MONITOR tab (replacing the disabled ARCHIVE stub) with system gauges, a process tree showing all Claude agents, and a session history chart.
+Add hardware usage metrics to ModelScope in two places: a compact always-visible summary pinned to the bottom of the right sidebar, and a full MONITOR tab (replacing the disabled ARCHIVE stub) with system gauges, a process tree showing all Claude processes, and a session history chart.
 
 ## Design
 
 ### 1. Data Collection — `src/hardware-monitor.js`
 
-A standalone module that runs in the Electron main process. Polls every 2.5 seconds.
+A standalone ES module (`export default class HardwareMonitor`) that runs in the Electron main process. Imported in `main.js` via standard `import`. Polls every 2.5 seconds.
 
 **System-wide metrics:**
 
-- CPU: overall utilization % calculated from `os.cpus()` idle-vs-total delta between two consecutive polls
+- CPU: overall utilization % calculated from `os.cpus()` — sum idle and total times across all cores, compute the delta ratio between two consecutive polls
 - Memory: used/total in GB from `os.totalmem()` and `os.freemem()`
-- GPU: detected at startup by checking PATH for `nvidia-smi`, `rocm-smi`, or `xpu-smi`. If found, queries utilization %, VRAM used/total, temperature, and GPU name. If none found, GPU data is `null` and the UI hides GPU sections entirely.
+- GPU: detected at startup. On Windows, try `nvidia-smi` at both PATH and `C:\Windows\System32\nvidia-smi.exe` fallback. On Unix, check PATH for `nvidia-smi`, `rocm-smi`, or `xpu-smi`. If found, queries utilization %, VRAM used/total, temperature, and GPU name. If none found, GPU data is `null` and the UI hides GPU sections entirely. Each GPU poll is wrapped in try/catch — on failure, emit `gpu: null` and re-attempt detection on next poll.
 
 **Per-process metrics:**
 
-- Walks the process tree starting from known Claude Code PIDs (from node-pty spawn or tracked session processes)
-- Windows: `wmic process where "ParentProcessId=<PID>" get ProcessId,Name,WorkingSetSize` (recursive)
-- Unix: `ps -o pid,ppid,pcpu,rss,comm` filtered by parent PID chain
-- Each process: PID, name, CPU %, memory MB
-- Subagents identified by matching PIDs against the `activeSubagents` data the server already tracks
+- The monitor exposes a `setRootPid(pid)` method. When set, it walks the process tree from that PID. When not set, it uses `process.pid` (the Electron process) as the root.
+- `main.js` calls `setRootPid(ptyProcess.pid)` when a session starts and `setRootPid(null)` when it ends.
+- Windows: `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,WorkingSetSize | ConvertTo-Json"` — parse JSON, filter to descendants of root PID recursively. Windows ARM (`process.arch === "arm64"` on `win32`): skip per-process metrics, return empty array.
+- Unix: `ps -eo pid,ppid,pcpu,rss,comm` — filter by parent PID chain
+- Each process: PID, name, CPU %, memory MB, parentPid
+- `isAgent` and `agentType` are NOT populated from `activeSubagents` (those track tool-use IDs, not OS PIDs). Instead, processes are simply shown as a tree. Agent identification is a future extension.
 
 **Module API:**
 
 ```javascript
-class HardwareMonitor {
-  start(intervalMs)    // begin polling
-  stop()               // stop polling, clear timers
-  onData(callback)     // register listener for metrics updates
+export default class HardwareMonitor {
+  start(intervalMs)       // begin polling
+  stop()                  // stop polling, clear timers
+  setRootPid(pid | null)  // set root PID for process tree, null = use Electron PID
+  onData(callback)        // register listener for metrics updates
 }
 ```
 
@@ -57,77 +59,81 @@ class HardwareMonitor {
     name: string,
     cpuPercent: number,
     memoryMB: number,
-    isAgent: boolean,
-    agentType?: string,
-    parentPid?: number
+    parentPid: number
   }]
 }
 ```
 
 ### 2. Right Sidebar — Split View
 
-The existing `Sidebar` component gains a pinned bottom zone below the current scrollable content.
+The existing `Sidebar` component is restructured to pin a hardware zone at the bottom.
 
-**Layout:**
+**DOM structure change:** The current Sidebar root is a single `flex-col overflow-y-auto` div. This must be split into:
 
-- Top zone (flex-1, overflow-y auto): all existing metrics unchanged — plan, usage, tokens, velocity, cost, active agents, hot files, project info
-- Divider: `border-t border-white/[0.06]`
-- Bottom zone (fixed ~140px, no scroll): hardware summary gauges
+```
+<div className="flex flex-col h-full">           <!-- outer container, no overflow -->
+  <div className="flex-1 overflow-y-auto ...">    <!-- inner scrollable zone: all existing content -->
+    ...existing metrics, agents, hot files, project...
+  </div>
+  <div className="border-t border-white/[0.06]" /> <!-- divider -->
+  <div className="shrink-0 px-3 py-3">            <!-- pinned hardware zone, ~140px -->
+    ...compact gauges...
+  </div>
+</div>
+```
 
 **Bottom zone content:**
 
-- Three compact horizontal bars or ring gauges side by side: CPU %, Memory %, GPU % (conditional)
+- Three compact horizontal bars side by side: CPU %, Memory %, GPU % (conditional)
 - Each shows current value as a number and a fill bar
 - GPU gauge only renders when `gpu.available === true`
-- Below the gauges: a small label like "3 processes" linking mentally to the MONITOR tab
-
-**The bottom zone stays pinned** — it does not scroll with the rest of the sidebar content.
+- Below the gauges: a small label like "3 processes" as a visual hint toward the MONITOR tab
 
 ### 3. MONITOR Tab (Full Hardware View)
 
-The disabled "ARCHIVE" button in the StatusBar is renamed to "MONITOR" and enabled. When selected, it renders a full-width content view in the center panel (same area as FEED and MAP).
+The disabled "ARCHIVE" button in the StatusBar is changed: `id` changes from `"archive"` to `"monitor"`, `label` changes from `"ARCHIVE"` to `"MONITOR"`, and `enabled` is set to `true`. When `activeView === "monitor"`, a `MonitorView` component renders in the center panel.
 
 **Three sections, vertically stacked, scrollable:**
 
 **Section 1 — System Overview:**
 
 - Three larger gauge cards side by side: CPU, Memory, GPU
-- Each card: current value, mini sparkline (last 60 data points ≈ 2.5 minutes of history), peak value during the session
+- Each card: current value, mini sparkline showing the last 60 entries of `hardwareHistory` (≈ 2.5 minutes), peak value during the session
 - GPU card: GPU name (e.g., "RTX 4070"), utilization %, VRAM bar (used/total), temperature in °C
 - If no GPU detected, only CPU and Memory cards render (two-column layout)
 
 **Section 2 — Process Tree:**
 
-- Tree view rooted at the Claude Code session process, child agents/subagents nested underneath
-- Each row: PID, process name, agent type (from `activeSubagents` tracking), CPU %, memory MB
-- Live-updating — rows appear/disappear as agents spawn and exit
-- Agent rows highlighted with indigo accent, non-agent child processes dimmed
+- Tree view rooted at the root PID, child processes nested underneath by `parentPid`
+- Each row: PID, process name, CPU %, memory MB
+- Live-updating — rows appear/disappear as processes spawn and exit
 - Expandable/collapsible tree nodes
 
 **Section 3 — History Chart:**
 
 - Line chart showing CPU % and memory % over session duration
-- Stores last 120 data points (≈ 5 minutes at 2.5s intervals)
+- Uses the full `hardwareHistory` array (max 120 entries ≈ 5 minutes at 2.5s intervals)
 - Rendered as SVG `<polyline>` — no charting library, matches the existing SVG-based approach used in LogicMap
 - Two lines: CPU in cyan, memory in indigo
 - Y-axis 0–100%, X-axis is time (relative, "5m ago" → "now")
 
-**Sparkline storage:** The `Dashboard` component maintains a `hardwareHistory` array (max 120 entries) that the MONITOR view's sparklines and history chart read from.
+**Sparkline vs history:** The gauge card sparklines use `hardwareHistory.slice(-60)` (last 2.5 minutes). The history chart uses the full 120-entry array (last 5 minutes).
 
 ### 4. File Changes
 
 **New files:**
 
-- `src/hardware-monitor.js` (~150 lines): data collection class with polling, process tree walking, GPU detection
+- `src/hardware-monitor.js` (~150 lines): ES module, data collection class with polling, process tree walking, GPU detection
 
 **Modified files:**
 
 **`electron/main.js` (~15 lines added):**
 
-- Import `HardwareMonitor` from `../src/hardware-monitor.js`
-- Instantiate after window ready, call `start(2500)`
-- Forward data to renderer via `mainWindow.webContents.send("hardware-metrics", data)` in `onData` callback
-- Call `stop()` on `window-all-closed`
+- `let hardwareMonitor = null;` declared at module scope alongside `mainWindow` and `serverProcess`
+- Inside `createWindow`, after `ready-to-show`: instantiate `HardwareMonitor`, call `start(2500)`, wire `onData` to forward via `mainWindow.webContents.send("hardware-metrics", data)`
+- When pty session starts: `hardwareMonitor.setRootPid(ptyProcess.pid)`
+- When pty session ends: `hardwareMonitor.setRootPid(null)`
+- In `window-all-closed`: `hardwareMonitor?.stop()`
 
 **`electron/preload.cjs` (~4 lines added):**
 
@@ -137,14 +143,14 @@ The disabled "ARCHIVE" button in the StatusBar is renamed to "MONITOR" and enabl
 **`app/components/Dashboard.tsx` (~250 lines added):**
 
 - Root `Dashboard`: add `hardwareMetrics` state + `hardwareHistory` array (max 120), wire IPC listener
-- `Sidebar`: accept `hardwareMetrics` prop, render pinned bottom zone with compact gauges
-- `StatusBar`: rename "ARCHIVE" to "MONITOR", set `enabled: true`
-- New `MonitorView` component: system overview gauges, process tree, SVG history chart
+- `Sidebar`: accept `hardwareMetrics` prop, restructure DOM to pin bottom zone, render compact gauges
+- `StatusBar`: change ARCHIVE button `id` to `"monitor"`, `label` to `"MONITOR"`, `enabled` to `true`
+- New `MonitorView` component: system overview gauges with sparklines, process tree, SVG history chart
 - `MonitorView` receives `hardwareMetrics` (current) and `hardwareHistory` (array) as props
 
 **`app/globals.css` (~10 lines added):**
 
-- Gauge ring/bar animation keyframes
+- Gauge bar animation keyframes
 
 **No changes to:** `server.js`, `src/parser.js`, `src/usage-cache.js`, `src/watcher.js`, feed logic, settings, LogicMap, CommandBar
 
@@ -158,8 +164,10 @@ The disabled "ARCHIVE" button in the StatusBar is renamed to "MONITOR" and enabl
 
 ### 6. Future Extension (Out of Scope)
 
+- Agent type identification (correlating OS PIDs with `activeSubagents` tool-use IDs)
 - Disk I/O metrics
 - Network usage per process
 - Hardware alerts/thresholds (e.g., "CPU > 90% for 30s")
 - Historical data persistence across app restarts
 - Remote machine monitoring
+- Windows ARM per-process metrics
