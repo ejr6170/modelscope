@@ -60,10 +60,11 @@ function createWindow() {
     y: screenH - winH - 24,
     frame: false,
     transparent: true,
-    alwaysOnTop: true,
+    alwaysOnTop: false,
     skipTaskbar: false,
     resizable: true,
     minimizable: true,
+    focusable: true,
     hasShadow: false,
     icon: path.join(__dirname, "..", "public", "logo.png"),
     webPreferences: {
@@ -73,6 +74,15 @@ function createWindow() {
     },
   });
 
+  mainWindow.on("focus", () => {
+    mainWindow.setAlwaysOnTop(true);
+    mainWindow.setAlwaysOnTop(false);
+  });
+
+  ipcMain.on("window-focus", () => {
+    mainWindow.show();
+    mainWindow.focus();
+  });
   ipcMain.on("window-minimize", () => mainWindow.minimize());
   ipcMain.on("window-toggle-maximize", () => {
     if (mainWindow.isMaximized()) mainWindow.unmaximize();
