@@ -28,8 +28,8 @@ Replace the MAP tab with an AGENTS tab showing a left-to-right radial tree visua
   - Indigo = completed successfully
   - Red = failed/errored
   - Gray = pending/starting
-- Label text right of the circle: agent type or name (e.g., "code-reviewer", "Explore", "general-purpose")
-- Small metric text below the label: token count (e.g., "2.1k tok") or elapsed time (e.g., "45s")
+- Label text right of the circle: agent type (from `subagentType` field, e.g., "code-reviewer", "Explore"). Falls back to `subagentDesc` truncated to 20 chars if type is null/undefined.
+- Small metric text below the label: elapsed time (e.g., "45s") for active agents, or token count if available from the result.
 - Connecting lines: thin (0.5-1px), straight, subtle color (rgba white ~10%)
 
 **Spacing:**
@@ -38,7 +38,9 @@ Replace the MAP tab with an AGENTS tab showing a left-to-right radial tree visua
 - Horizontal spacing between tree levels: 180px
 - Generous padding ensures readability even with 10+ agents
 
-**Pan and zoom:** Reuse the existing drag/scroll handlers from the former LogicMap — same `offset`, `zoom`, `dragging` state and mouse event handlers.
+**Pan and zoom:** Reuse the existing drag/scroll handlers — same `offset`, `zoom`, `dragging` state and mouse event handlers. The SVG viewBox is computed from node positions.
+
+**Empty state:** When no agents have been spawned (both `activeSubagents` and `completedAgents` are empty), the AGENTS view shows a centered placeholder: an icon, "No agents yet", and "Agents will appear here when Claude dispatches subagents." If `sessionInfo` is null, show "No active session" instead.
 
 ### 2. Side Detail Panel
 
@@ -47,58 +49,57 @@ Clicking any node opens a detail panel on the right side of the AGENTS view. The
 **Panel content for an agent node:**
 
 - Header: agent type, status badge (Active / Done / Failed), elapsed time since spawn
-- Metrics row: token count (input + output), tool calls made, files touched count
-- Activity feed: scrollable mini-feed of that agent's events, using the existing `subagent_event` data. Shows tool calls, file edits, text output — same card format as the main FEED but filtered to that agent's `agentId`.
+- Metrics row: token count (from result text length as proxy), tool calls count (counted from events)
+- Activity feed: scrollable mini-feed of that agent's events. Events are keyed by the **unified agent ID** (see §3). Shows tool calls, file edits, text output as simple text entries — not full feed cards.
 - Result summary: when agent is done, shows the final result text from `subagent_end` event (truncated with expand option)
 
 **Panel content for the root session node:**
 
 - Session metrics in wider format: tokens, cost, velocity, turns, elapsed
-- Summary list of all agents spawned with their status and token counts
+- Summary list of all agents spawned with their status
 
 **Dismissing the panel:** Click the same node again, click an X button on the panel header, or press Escape. Tree re-centers to full width.
 
 ### 3. Data Model Changes
 
-**Current state:** The server tracks `activeSubagents` as a flat `Map<toolUseId, { type, desc, startTime, background }>`. When an agent finishes, it's deleted from the map via `subagent_end`. There's no parent-child relationship tracking, and completed agents disappear from state.
+**Critical identity issue:** The server currently uses two different ID spaces for agents:
 
-**Changes needed:**
+- `toolUseId` (from `tu.id` in `processEvent`) — used in `activeSubagents` Map, `subagent_start`, `subagent_end`
+- `agentId` (filesystem-derived UUID from subagent log filenames) — used in `subagent_event` emissions from `checkSubagentLogs`
 
-**`server.js` — Add parent tracking (~10 lines):**
+These two IDs have no join. To build a working detail panel, we must unify them.
 
-When processing an `Agent` tool use (`tu.isSubagent`), check if the event itself came from a subagent context (`event.isSubagentEvent === true` and `event.agentId` is set). If so, store the parent's `agentId` as `parentId` on the child subagent entry:
+**Fix: Create an ID mapping on the server.**
 
-```
-activeSubagents.set(tu.id, {
-  type: tu.subagentType,
-  desc: tu.subagentDesc,
-  startTime: event.timestamp,
-  background: tu.subagentBackground,
-  parentId: event.isSubagentEvent ? event.agentId : null,
-});
-```
+In `server.js`, maintain a `Map<string, string>` called `agentIdMap` that maps `toolUseId → filesystemAgentId`. When `subagent_start` fires for a `toolUseId`, also scan `findSubagentLogs` to find the corresponding log file and extract the filesystem `agentId`. Store the mapping. Then when `subagent_event` arrives with a filesystem `agentId`, look up the corresponding `toolUseId` and include it in the emission so the renderer can match events to the right tree node.
 
-Include `parentId` in the `subagent_start` event emission and in the `metrics.activeSubagents` array so the renderer can build the tree.
+Alternatively (simpler): emit `subagent_event` with BOTH `agentId` (filesystem) AND `toolUseId` (from the mapping), and key everything on the renderer side by `toolUseId`. The renderer stores events as `Record<toolUseId, Event[]>`.
 
-**`Dashboard.tsx` — Add completed agents state:**
+**Parent-child tracking fix:** The spec originally proposed detecting `event.isSubagentEvent` inside `processEvent`, but `processEvent` only handles root session events — subagent events flow through `checkSubagentLogs` instead and never call `processEvent`.
 
-Currently, `subagent_end` events remove agents from `activeSubagents`. Add a `completedAgents` array in the Dashboard component that accumulates finished agents:
+**Correct approach:** In `checkSubagentLogs`, when parsing a subagent's JSONL and encountering an `Agent` tool use (a sub-subagent spawn), emit a new event `subagent_nested_start` with the parent's `toolUseId` and the child's tool use details. The renderer uses this to build the tree hierarchy. For the MVP, if nested detection is too complex, a **flat tree** (all agents as children of root) is acceptable — hierarchy is a nice-to-have, not a blocker.
 
-```
-const [completedAgents, setCompletedAgents] = useState<CompletedAgent[]>([]);
-```
+**`server.js` changes (~25 lines):**
 
-On `subagent_end`, instead of losing the agent, push it to `completedAgents` with its final result and duration. The AGENTS view reads from both `metrics.activeSubagents` (live) and `completedAgents` (done) to build the full tree.
+- Add `agentIdMap` (Map<string, string>) at project state level
+- In `processEvent` when `tu.isSubagent`: after adding to `activeSubagents`, also call `findSubagentLogs` to find the log file and store the `toolUseId → filesystemAgentId` mapping
+- In `checkSubagentLogs`: when emitting `subagent_event`, look up the `toolUseId` from `agentIdMap` (reverse lookup) and include it in the emission
+- In `subagent_end` handler: include the agent's accumulated events or at minimum the result text
+- Remove: `parseDependencies` import, `/scan-dependencies` endpoint, `depCache`/`depCacheTime` variables
+- Keep: `/scan-directory` endpoint (still used by other features, harmless dead code otherwise)
 
-**`Dashboard.tsx` — Add per-agent event buffer:**
+**`Dashboard.tsx` — New state:**
 
-To power the detail panel's activity feed, store subagent events keyed by `agentId`:
-
-```
-const [agentEvents, setAgentEvents] = useState<Record<string, SubagentEvent[]>>({});
+```tsx
+const [completedAgents, setCompletedAgents] = useState<{ id: string; type: string; desc: string; startTime: string; result?: string; isError?: boolean; parentId?: string }[]>([]);
+const [agentEvents, setAgentEvents] = useState<Record<string, { role: string; text?: string; toolUses?: unknown[]; timestamp?: string }[]>>({});
 ```
 
-On each `subagent_event` socket event, append to the relevant agent's buffer (cap at 50 events per agent to prevent memory growth).
+**New socket listeners (must be created from scratch — they don't exist today):**
+
+- `s.on("subagent_end", ...)` — push to `completedAgents` with result, DO NOT discard
+- `s.on("subagent_event", ...)` — append to `agentEvents[toolUseId]`, cap at 50 per agent
+- Existing `s.on("subagent_start", ...)` already exists and populates `activeSubagents` via metrics
 
 ### 4. File Changes
 
@@ -106,23 +107,23 @@ On each `subagent_event` socket event, append to the relevant agent's buffer (ca
 
 - `src/dependency-parser.js` — no longer needed
 - `/scan-dependencies` endpoint in `server.js` — no longer needed
-- `LogicMap` component, `flattenTree`, `layoutHierarchy`, `DirEntry`/`MapNode`/`MapEdge` interfaces, `extColor` function in Dashboard.tsx
+- `LogicMap` component, `flattenTree`, `layoutHierarchy`, `DirEntry`/`MapNode`/`MapEdge` interfaces, `extColor` function, `incomingCounts`/`activityScores`/`flowPath`/`depEdges` state in Dashboard.tsx
 
 **Modified:**
 
-**`server.js` (~10 lines changed):**
+**`server.js` (~25 lines changed):**
 
-- Add `parentId` field to subagent tracking in `processEvent`
-- Include `parentId` in `subagent_start` emission and `buildMetricsPayload`
-- Remove `parseDependencies` import and `/scan-dependencies` endpoint + cache variables
+- Add `agentIdMap` for ID unification
+- Populate mapping on `subagent_start`
+- Include `toolUseId` in `subagent_event` emissions
+- Remove `parseDependencies` import, `/scan-dependencies` endpoint + cache variables
 
 **`app/components/Dashboard.tsx` (~300 lines net change):**
 
-- Remove: `LogicMap` component and all MAP-related code (~250 lines removed)
+- Remove: `LogicMap` component and all MAP-related code (~300 lines removed)
 - Add: `AgentsView` component with tree layout, node rendering, side panel (~300 lines added)
 - Add: `completedAgents` and `agentEvents` state in Dashboard
-- Add: socket listener for `subagent_event` that populates `agentEvents`
-- Update: `subagent_end` handler to move agent to `completedAgents` instead of discarding
+- Add: socket listeners for `subagent_end` and `subagent_event`
 - Update: StatusBar tab config: `map` → `agents`
 - Update: view rendering: `activeView === "map"` → `activeView === "agents"`
 
@@ -139,7 +140,9 @@ On each `subagent_event` socket event, append to the relevant agent's buffer (ca
 
 ### 6. Future Extension (Out of Scope)
 
+- Nested agent hierarchy (sub-subagents) — MVP shows flat tree, hierarchy is future work
 - Agent cost tracking (per-agent USD spend)
+- Per-agent file tracking
 - Agent performance comparison across sessions
 - Re-dispatch / restart a failed agent from the UI
 - Export agent tree as image
