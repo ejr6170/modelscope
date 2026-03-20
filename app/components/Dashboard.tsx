@@ -1031,17 +1031,61 @@ const extColor = (ext: string) => {
 
 function flattenTree(entries: DirEntry[], parent = ""): MapNode[] {
   const nodes: MapNode[] = [];
-  entries.forEach((e, i) => {
-    const angle = (i / entries.length) * Math.PI * 2;
-    const radius = parent ? 35 : 65;
-    const centerX = parent ? 0 : 200;
-    const centerY = parent ? 0 : 200;
-    nodes.push({ id: e.path, name: e.name, ext: e.ext || "", type: e.type, lines: e.lines || 0, x: centerX + Math.cos(angle) * radius, y: centerY + Math.sin(angle) * radius, parentDir: parent });
+  for (const e of entries) {
+    nodes.push({ id: e.path, name: e.name, ext: e.ext || "", type: e.type, lines: e.lines || 0, x: 0, y: 0, parentDir: parent });
     if (e.type === "dir" && e.children) {
       nodes.push(...flattenTree(e.children, e.path));
     }
-  });
+  }
   return nodes;
+}
+
+const COL_WIDTH = 200;
+const ROW_HEIGHT = 32;
+const NODE_W = 130;
+const NODE_H = 24;
+const LANE_PAD = 12;
+
+function layoutHierarchy(nodes: MapNode[], collapsed: Set<string>): MapNode[] {
+  const visible = nodes.filter(n => {
+    if (!n.parentDir) return true;
+    let p = n.parentDir;
+    while (p) {
+      if (collapsed.has(p)) return false;
+      const pn = nodes.find(nn => nn.id === p);
+      p = pn?.parentDir || "";
+    }
+    return true;
+  });
+
+  const depthOf = (id: string): number => {
+    const parts = id.split("/");
+    return parts.length - 1;
+  };
+
+  const colGroups = new Map<number, MapNode[]>();
+  for (const n of visible) {
+    const col = depthOf(n.id);
+    if (!colGroups.has(col)) colGroups.set(col, []);
+    colGroups.get(col)!.push(n);
+  }
+
+  for (const [, group] of colGroups) {
+    group.sort((a, b) => {
+      if (a.parentDir !== b.parentDir) return a.parentDir.localeCompare(b.parentDir);
+      if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  for (const [col, group] of colGroups) {
+    group.forEach((n, i) => {
+      n.x = col * COL_WIDTH + LANE_PAD;
+      n.y = i * ROW_HEIGHT + LANE_PAD;
+    });
+  }
+
+  return visible;
 }
 
 function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fileTargets: Record<string, string>; onJumpToCard: (cardId: string) => void }) {
@@ -1090,53 +1134,17 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
     const flat = flattenTree(tree);
     if (flat.length === 0) return { nodes: [], edges: [] };
 
+    const visible = layoutHierarchy(flat, collapsed);
+
     const edgeList: MapEdge[] = [];
-    for (const n of flat) {
-      if (n.parentDir) edgeList.push({ from: n.parentDir, to: n.id });
-    }
-
-    const dirNodes = flat.filter(n => n.type === "dir" && !n.parentDir);
-    const cx = 200, cy = 200;
-
-    dirNodes.forEach((d, i) => {
-      const angle = (i / Math.max(dirNodes.length, 1)) * Math.PI * 2 - Math.PI / 2;
-      const radius = 80 + dirNodes.length * 8;
-      d.x = cx + Math.cos(angle) * radius;
-      d.y = cy + Math.sin(angle) * radius;
-    });
-
-    for (const dir of flat.filter(n => n.type === "dir")) {
-      const children = flat.filter(n => n.parentDir === dir.id);
-      children.forEach((child, i) => {
-        const angle = (i / Math.max(children.length, 1)) * Math.PI * 2;
-        const radius = 20 + children.length * 3;
-        child.x = dir.x + Math.cos(angle) * radius;
-        child.y = dir.y + Math.sin(angle) * radius;
-      });
-    }
-
-    const rootFiles = flat.filter(n => n.type === "file" && !n.parentDir);
-    rootFiles.forEach((f, i) => {
-      const angle = (i / Math.max(rootFiles.length, 1)) * Math.PI * 2;
-      f.x = cx + Math.cos(angle) * 30;
-      f.y = cy + Math.sin(angle) * 30;
-    });
-
-    const visible = flat.filter(n => {
-      if (!n.parentDir) return true;
-      let parent = n.parentDir;
-      while (parent) {
-        if (collapsed.has(parent)) return false;
-        const pNode = flat.find(nn => nn.id === parent);
-        parent = pNode?.parentDir || "";
-      }
-      return true;
-    });
-
     const visibleIds = new Set(visible.map(n => n.id));
-    const visibleEdges = edgeList.filter(e => visibleIds.has(e.from) && visibleIds.has(e.to));
+    for (const n of visible) {
+      if (n.parentDir && visibleIds.has(n.parentDir)) {
+        edgeList.push({ from: n.parentDir, to: n.id });
+      }
+    }
 
-    return { nodes: visible, edges: visibleEdges };
+    return { nodes: visible, edges: edgeList };
   }, [tree, collapsed]);
 
   const incomingCounts = useMemo(() => {
@@ -1202,27 +1210,28 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
   }
 
   const hovered = hoveredNode ? nodes.find(n => n.id === hoveredNode) : null;
-  const minX = Math.min(...nodes.map(n => n.x)) - 30;
-  const minY = Math.min(...nodes.map(n => n.y)) - 30;
-  const maxX = Math.max(...nodes.map(n => n.x)) + 30;
-  const maxY = Math.max(...nodes.map(n => n.y)) + 30;
+  const padX = 20, padY = 20;
+  const vbW = Math.max(...nodes.map(n => n.x + NODE_W), 400) + padX * 2;
+  const vbH = Math.max(...nodes.map(n => n.y + NODE_H), 300) + padY * 2;
+
+  const dirLanes = useMemo(() => {
+    const lanes: { id: string; name: string; x: number; yMin: number; yMax: number }[] = [];
+    const dirs = nodes.filter(n => n.type === "dir");
+    for (const dir of dirs) {
+      const children = nodes.filter(n => n.parentDir === dir.id);
+      if (children.length === 0) continue;
+      const allY = [dir.y, ...children.map(c => c.y)];
+      lanes.push({ id: dir.id, name: dir.name, x: dir.x, yMin: Math.min(...allY) - 8, yMax: Math.max(...allY) + NODE_H + 8 });
+    }
+    return lanes;
+  }, [nodes]);
 
   return (
     <div className="w-full h-full relative overflow-hidden cursor-grab active:cursor-grabbing"
          onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel}>
 
-      <svg viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`} className="w-full h-full"
+      <svg viewBox={`${-padX} ${-padY} ${vbW} ${vbH}`} className="w-full h-full"
            style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`, transformOrigin: "center" }}>
-
-        {nodes.filter(n => n.type === "dir").map(dir => {
-          const children = nodes.filter(n => n.parentDir === dir.id);
-          if (children.length === 0) return null;
-          const cxs = [dir.x, ...children.map(c => c.x)];
-          const cys = [dir.y, ...children.map(c => c.y)];
-          const clX = Math.min(...cxs) - 12, clY = Math.min(...cys) - 12;
-          const clW = Math.max(...cxs) - clX + 24, clH = Math.max(...cys) - clY + 24;
-          return <rect key={`cluster-${dir.id}`} x={clX} y={clY} width={clW} height={clH} rx="6" fill="rgba(99, 102, 241, 0.03)" stroke="rgba(99, 102, 241, 0.08)" strokeWidth="0.5" />;
-        })}
 
         <defs>
           <marker id="arrow-import" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -1236,19 +1245,34 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
           </marker>
         </defs>
 
+        {dirLanes.map(lane => (
+          <g key={`lane-${lane.id}`}>
+            <rect x={lane.x - 6} y={lane.yMin} width={NODE_W + 12} height={lane.yMax - lane.yMin} rx="4" fill="rgba(99, 102, 241, 0.03)" stroke="rgba(99, 102, 241, 0.06)" strokeWidth="0.5" />
+            <text x={lane.x} y={lane.yMin + 8} className="text-[4px] font-sans font-bold" fill="rgba(129, 140, 248, 0.35)" style={{ letterSpacing: "0.1em", textTransform: "uppercase" } as React.CSSProperties}>{lane.name}</text>
+          </g>
+        ))}
+
         {(depsLayer ? depEdges : edges).map((edge, i) => {
           const a = nodes.find(n => n.id === edge.from);
           const b = nodes.find(n => n.id === edge.to);
           if (!a || !b) return null;
           const isHovered = hoveredNode === edge.from || hoveredNode === edge.to;
           if (depsLayer) {
-            const mx = (a.x + b.x) / 2 + (a.y - b.y) * 0.15;
-            const my = (a.y + b.y) / 2 + (b.x - a.x) * 0.15;
-            const color = edge.edgeType === "require" ? "rgba(34, 211, 238, 0.3)" : edge.edgeType === "css-import" ? "rgba(192, 132, 252, 0.3)" : "rgba(129, 140, 248, 0.3)";
+            const ax = a.x + NODE_W, ay = a.y + NODE_H / 2;
+            const bx = b.x, by = b.y + NODE_H / 2;
+            const isBack = bx <= ax;
+            const cx1 = isBack ? ax + 30 : ax + (bx - ax) * 0.4;
+            const cy1 = isBack ? Math.min(ay, by) - 20 : ay;
+            const cx2 = isBack ? bx - 30 : ax + (bx - ax) * 0.6;
+            const cy2 = isBack ? Math.min(ay, by) - 20 : by;
+            const color = edge.edgeType === "require" ? "rgba(34, 211, 238, 0.35)" : edge.edgeType === "css-import" ? "rgba(192, 132, 252, 0.35)" : "rgba(129, 140, 248, 0.35)";
             const markerId = edge.edgeType === "require" ? "arrow-require" : edge.edgeType === "css-import" ? "arrow-css" : "arrow-import";
-            return <path key={`dep-${i}`} d={`M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`} fill="none" stroke={color} strokeWidth={isHovered ? 1.2 : (activityLayer && activityScores[edge.from] && activityScores[edge.to] ? 1 : 0.5)} opacity={isHovered ? 1 : (activityLayer && (activityScores[edge.from] || activityScores[edge.to]) ? 0.8 : 0.5)} markerEnd={`url(#${markerId})`} />;
+            return <path key={`dep-${i}`} d={`M${ax},${ay} C${cx1},${cy1} ${cx2},${cy2} ${bx},${by}`} fill="none" stroke={color}
+              strokeWidth={isHovered ? 1.5 : (activityLayer && activityScores[edge.from] && activityScores[edge.to] ? 1 : 0.5)}
+              opacity={isHovered ? 1 : (activityLayer && (activityScores[edge.from] || activityScores[edge.to]) ? 0.8 : 0.4)}
+              markerEnd={`url(#${markerId})`} />;
           }
-          return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(129, 140, 248, 0.12)" strokeWidth="0.5" />;
+          return <line key={i} x1={a.x + NODE_W} y1={a.y + NODE_H / 2} x2={b.x} y2={b.y + NODE_H / 2} stroke="rgba(129, 140, 248, 0.12)" strokeWidth="0.5" />;
         })}
 
         {nodes.map(node => {
@@ -1259,48 +1283,59 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
           const isSniped = target === "snipe";
           const isFocus = target === "focus";
           const inc = incomingCounts[node.id] || 0;
-          const nodeRadius = isDir ? 8 : Math.min(5 + inc * 1.5, 14);
-          const stroke = isDir ? "rgba(255,255,255,0.15)" : extColor(node.ext);
+          const actScore = activityScores[node.id] || activityScores[node.name] || 0;
+          const borderColor = isHov ? "#818cf8" : isFocus ? "rgba(251,191,36,0.6)" : (activityLayer && actScore > 0) ? `rgba(251, 191, 36, ${Math.min(actScore / 10, 0.6)})` : isDir ? "rgba(255,255,255,0.08)" : extColor(node.ext);
 
           return (
             <g key={node.id}
                onMouseEnter={() => setHoveredNode(node.id)} onMouseLeave={() => setHoveredNode(null)}
                onClick={(e) => { e.stopPropagation(); if (isDir) toggleCollapse(node.id); else { const card = cards.find(c => c.filename === node.name || c.filename === node.id); if (card) onJumpToCard(card.id); } }}
-               className="cursor-pointer">
-              {(isRecent || isFocus) && <circle cx={node.x} cy={node.y} r={nodeRadius + 4} fill={isFocus ? "rgba(251,191,36,0.15)" : "rgba(129,140,248,0.15)"} opacity="0.8">
-                <animate attributeName="r" values={`${nodeRadius + 3};${nodeRadius + 6};${nodeRadius + 3}`} dur="2.5s" repeatCount="indefinite" />
-              </circle>}
-              {activityLayer && (activityScores[node.id] || activityScores[node.name] || 0) > 0 && (
-                <circle cx={node.x} cy={node.y} r={nodeRadius + 6} fill="none" stroke="rgba(251, 191, 36, 0.3)" strokeWidth="1.5" opacity={Math.min((activityScores[node.id] || activityScores[node.name] || 0) / 10, 1)}>
-                  <animate attributeName="opacity" values={`${Math.min((activityScores[node.id] || activityScores[node.name] || 0) / 10, 1)};${Math.min((activityScores[node.id] || activityScores[node.name] || 0) / 15, 0.6)};${Math.min((activityScores[node.id] || activityScores[node.name] || 0) / 10, 1)}`} dur="2s" repeatCount="indefinite" />
-                </circle>
+               className="cursor-pointer" opacity={isSniped ? 0.25 : 1}>
+              {(activityLayer && actScore > 5) && (
+                <rect x={node.x - 3} y={node.y - 3} width={NODE_W + 6} height={NODE_H + 6} rx="6" fill="none" stroke="rgba(251, 191, 36, 0.2)" strokeWidth="1">
+                  <animate attributeName="opacity" values="0.3;0.7;0.3" dur="2s" repeatCount="indefinite" />
+                </rect>
               )}
-              <circle cx={node.x} cy={node.y} r={nodeRadius} fill={isDir ? "rgba(30,32,45,0.9)" : "rgba(20,22,30,0.85)"}
-                stroke={isHov ? "#818cf8" : stroke} strokeWidth={isHov ? 1.2 : 0.6} opacity={isSniped ? 0.2 : 1} />
-              {isDir && collapsed.has(node.id) && <text x={node.x} y={node.y + 2} textAnchor="middle" className="text-[4px]" fill="rgba(255,255,255,0.3)">+</text>}
-              {!isDir && <text x={node.x} y={node.y + 1.5} textAnchor="middle" className="text-[2.5px] font-mono font-bold" fill={extColor(node.ext)}>{node.ext.toUpperCase()}</text>}
-              <text x={node.x} y={node.y + nodeRadius + 6} textAnchor="middle" className={`font-mono ${isDir ? "text-[3.5px] font-bold" : "text-[3px]"}`}
-                fill={isSniped ? "rgba(255,255,255,0.15)" : isDir ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.35)"}>
-                {node.name.length > 16 ? node.name.slice(0, 14) + ".." : node.name}
+              <rect x={node.x} y={node.y} width={NODE_W} height={NODE_H} rx="4"
+                fill={isDir ? "rgba(30,32,45,0.9)" : "rgba(15,16,24,0.9)"}
+                stroke={borderColor} strokeWidth={isHov ? 1.2 : (inc > 2 ? 0.8 : 0.5)} />
+              {!isDir && (
+                <circle cx={node.x + 8} cy={node.y + NODE_H / 2} r="3" fill={extColor(node.ext)} opacity="0.7" />
+              )}
+              {isDir && (
+                <text x={node.x + 8} y={node.y + NODE_H / 2 + 1.5} className="text-[5px]" fill="rgba(255,255,255,0.3)">
+                  {collapsed.has(node.id) ? "\u25B6" : "\u25BC"}
+                </text>
+              )}
+              <text x={node.x + (isDir ? 18 : 16)} y={node.y + NODE_H / 2 + 2} className={`font-mono ${isDir ? "text-[5px] font-bold" : "text-[4.5px]"}`}
+                fill={isDir ? "rgba(255,255,255,0.6)" : "rgba(255,255,255,0.5)"}>
+                {node.name.length > 18 ? node.name.slice(0, 16) + ".." : node.name}
               </text>
-              {isSniped && <line x1={node.x - nodeRadius} y1={node.y} x2={node.x + nodeRadius} y2={node.y} stroke="rgba(248,113,113,0.5)" strokeWidth="0.5" />}
+              {!isDir && node.lines > 0 && (
+                <text x={node.x + NODE_W - 6} y={node.y + NODE_H / 2 + 1.5} textAnchor="end" className="text-[3.5px] font-mono" fill="rgba(255,255,255,0.2)">{node.lines}L</text>
+              )}
+              {isSniped && <line x1={node.x + 4} y1={node.y + NODE_H / 2} x2={node.x + NODE_W - 4} y2={node.y + NODE_H / 2} stroke="rgba(248,113,113,0.4)" strokeWidth="0.5" />}
             </g>
           );
         })}
+
         {flowLayer && flowPath.length > 1 && flowPath.map((step, i) => {
           if (i === 0) return null;
           const prev = nodes.find(n => n.id === flowPath[i - 1].nodeId);
           const curr = nodes.find(n => n.id === step.nodeId);
           if (!prev || !curr) return null;
           const brightness = 0.3 + (i / flowPath.length) * 0.7;
+          const px = prev.x + NODE_W / 2, py = prev.y + NODE_H / 2;
+          const cx = curr.x + NODE_W / 2, cy = curr.y + NODE_H / 2;
+          const mx = (px + cx) / 2, my = (py + cy) / 2;
           return (
             <g key={`flow-${i}`} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); onJumpToCard(step.cardId); }}>
-              <line x1={prev.x} y1={prev.y} x2={curr.x} y2={curr.y}
+              <line x1={px} y1={py} x2={cx} y2={cy}
                 stroke={`rgba(34, 211, 238, ${brightness})`} strokeWidth="1.5" strokeDasharray="4 3">
                 <animate attributeName="stroke-dashoffset" from="0" to="-7" dur="1s" repeatCount="indefinite" />
               </line>
-              <circle cx={(prev.x + curr.x) / 2} cy={(prev.y + curr.y) / 2} r="5" fill="rgba(10,10,25,0.9)" stroke={`rgba(34, 211, 238, ${brightness})`} strokeWidth="0.8" />
-              <text x={(prev.x + curr.x) / 2} y={(prev.y + curr.y) / 2 + 1.5} textAnchor="middle" className="text-[3px] font-mono font-bold" fill={`rgba(34, 211, 238, ${brightness})`}>{i}</text>
+              <circle cx={mx} cy={my} r="6" fill="rgba(10,10,25,0.9)" stroke={`rgba(34, 211, 238, ${brightness})`} strokeWidth="0.8" />
+              <text x={mx} y={my + 2} textAnchor="middle" className="text-[4px] font-mono font-bold" fill={`rgba(34, 211, 238, ${brightness})`}>{i}</text>
               <title>{step.label}</title>
             </g>
           );
@@ -1318,6 +1353,7 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
           </div>
           <div className="flex items-center gap-3 text-[7px] font-mono text-txt-tertiary">
             {hovered.type === "file" && <span>{hovered.lines}L</span>}
+            {hovered.type === "file" && (incomingCounts[hovered.id] || 0) > 0 && <span className="text-indigo-400/70">{incomingCounts[hovered.id]} imports</span>}
             {hovered.type === "dir" && <span>{collapsed.has(hovered.id) ? "collapsed" : "expanded"}</span>}
             {recentFiles.has(hovered.id) && <span className="text-indigo-400/70">active</span>}
             {(fileTargets[hovered.id] || fileTargets[hovered.name]) === "focus" && <span className="text-amber-400">FOCUS</span>}
