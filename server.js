@@ -5,7 +5,7 @@ import path from "path";
 import os from "os";
 import { findNewestSession, findSubagentLogs, parseSubagentSummary, parseLine, extractEvent } from "./src/parser.js";
 import { getUsage, updateUsage, checkLogEntryForUsage } from "./src/usage-cache.js";
-import { parseDependencies } from "./src/dependency-parser.js";
+
 
 const PORT = 3778;
 const claudeDir = path.join(os.homedir(), ".claude");
@@ -13,8 +13,7 @@ const projectsDir = path.join(claudeDir, "projects");
 const REPLAY_WINDOW_MS = 5 * 60 * 1000;
 const LIVE_THRESHOLD_MS = 60 * 1000;
 
-let depCache = null;
-let depCacheTime = 0;
+const agentIdMap = new Map();
 
 const projectStates = new Map();
 
@@ -116,17 +115,6 @@ const httpServer = createServer((req, res) => {
     const tree = scanDir(targetDir);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ root: path.basename(targetDir), tree }));
-    return;
-  }
-
-  if (req.method === "GET" && req.url === "/scan-dependencies") {
-    const now = Date.now();
-    if (!depCache || now - depCacheTime > 10000) {
-      depCache = parseDependencies(path.resolve("."));
-      depCacheTime = now;
-    }
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(depCache));
     return;
   }
 
@@ -490,6 +478,17 @@ function checkSubagentLogs(projectId) {
   const subagents = findSubagentLogs(projectState.currentFile);
 
   for (const sa of subagents) {
+    if (!agentIdMap.has(sa.agentId)) {
+      for (const [tuId] of projectState.activeSubagents) {
+        if (!Array.from(agentIdMap.values()).includes(tuId)) {
+          agentIdMap.set(sa.agentId, tuId);
+          break;
+        }
+      }
+    }
+  }
+
+  for (const sa of subagents) {
     if (!projectState.subagentWatchers.has(sa.agentId)) {
       projectState.subagentWatchers.set(sa.agentId, { path: sa.path, offset: 0 });
     }
@@ -512,6 +511,7 @@ function checkSubagentLogs(projectId) {
       if (event && (event.role === "assistant" || event.role === "user")) {
         event.isSubagentEvent = true;
         event.agentId = sa.agentId;
+        event.toolUseId = agentIdMap.get(sa.agentId) || sa.agentId;
         emitToProjectViewers(projectId, "subagent_event", event);
       }
     }
