@@ -1018,6 +1018,236 @@ function LeftSidebar({ projects, activeProjectId, onSelect, cards, onJumpToCard,
 
 
 
+function AgentsView({ activeAgents, completedAgents, agentEvents, session, metrics }: {
+  activeAgents: { id: string; type?: string; desc?: string; startTime?: string; background?: boolean }[];
+  completedAgents: AgentNode[];
+  agentEvents: Record<string, AgentEvent[]>;
+  session: SessionInfo | null;
+  metrics: Metrics;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => { setDragging(true); dragStart.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y }; }, [offset]);
+  const handleMouseMove = useCallback((e: React.MouseEvent) => { if (!dragging) return; setOffset({ x: dragStart.current.ox + (e.clientX - dragStart.current.x), y: dragStart.current.oy + (e.clientY - dragStart.current.y) }); }, [dragging]);
+  const handleMouseUp = useCallback(() => setDragging(false), []);
+  const handleWheel = useCallback((e: React.WheelEvent) => { setZoom(z => Math.max(0.3, Math.min(3, z + (e.deltaY > 0 ? -0.1 : 0.1)))); }, []);
+
+  const allAgents = useMemo(() => {
+    const agents: (AgentNode & { status: "active" | "done" | "failed" })[] = [];
+    for (const a of activeAgents) {
+      agents.push({ id: a.id, type: a.type || "", desc: a.desc || "", startTime: a.startTime || "", background: a.background, status: "active" });
+    }
+    for (const a of completedAgents) {
+      if (!agents.some(x => x.id === a.id)) agents.push(a);
+    }
+    return agents;
+  }, [activeAgents, completedAgents]);
+
+  const selected = selectedId === "root" ? null : allAgents.find(a => a.id === selectedId) || null;
+  const showPanel = selectedId !== null;
+
+  const LEVEL_X = 180;
+  const NODE_GAP = 36;
+  const ROOT_X = 40;
+  const rootY = Math.max(allAgents.length * NODE_GAP, 100) / 2;
+
+  const statusColor = (s: string) => s === "active" ? "#4ade80" : s === "done" ? "#818cf8" : s === "failed" ? "#f87171" : "#64748b";
+
+  const elapsed = (startTime: string) => {
+    if (!startTime) return "";
+    const ms = Date.now() - new Date(startTime).getTime();
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m${s % 60}s`;
+    return `${Math.floor(m / 60)}h${m % 60}m`;
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSelectedId(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  if (!session) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center space-y-2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto text-indigo-400/20">
+            <circle cx="12" cy="12" r="3" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2" />
+          </svg>
+          <p className="text-[9px] font-sans text-txt-tertiary">No active session</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (allAgents.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center space-y-2">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="mx-auto text-indigo-400/20">
+            <circle cx="12" cy="12" r="10" /><path d="M8 12h8M12 8v8" />
+          </svg>
+          <p className="text-[9px] font-sans text-txt-secondary">No agents yet</p>
+          <p className="text-[8px] font-sans text-txt-tertiary">Agents will appear here when subagents are dispatched</p>
+        </div>
+      </div>
+    );
+  }
+
+  const svgW = ROOT_X + LEVEL_X + 200;
+  const svgH = Math.max(allAgents.length * NODE_GAP + 40, 200);
+
+  return (
+    <div className="flex h-full">
+      <div className={`${showPanel ? "w-[60%]" : "w-full"} h-full relative overflow-hidden cursor-grab active:cursor-grabbing transition-all duration-300`}
+           onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel}>
+        <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-full"
+             style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})`, transformOrigin: "center" }}>
+
+          <g className="cursor-pointer" onClick={() => setSelectedId(selectedId === "root" ? null : "root")}>
+            <circle cx={ROOT_X} cy={rootY} r="14" fill="rgba(30,32,45,0.9)" stroke={selectedId === "root" ? "#818cf8" : "rgba(99,102,241,0.3)"} strokeWidth={selectedId === "root" ? 1.5 : 1} />
+            <text x={ROOT_X} y={rootY + 1.5} textAnchor="middle" className="text-[5px] font-mono font-bold" fill="rgba(129,140,248,0.8)">ROOT</text>
+            <text x={ROOT_X} y={rootY + 22} textAnchor="middle" className="text-[4px] font-mono" fill="rgba(255,255,255,0.4)">{session?.project?.replace(/^C--Users-[^-]+-/, "").replace(/-/g, "/").split("/").pop() || "session"}</text>
+          </g>
+
+          {allAgents.map((agent, i) => {
+            const ax = ROOT_X + LEVEL_X;
+            const ay = i * NODE_GAP + 20;
+            const isSelected = selectedId === agent.id;
+            const color = statusColor(agent.status);
+            const label = agent.type || (agent.desc || "agent").slice(0, 20);
+            const events = agentEvents[agent.id] || [];
+
+            return (
+              <g key={agent.id}>
+                <line x1={ROOT_X + 14} y1={rootY} x2={ax - 12} y2={ay} stroke="rgba(255,255,255,0.08)" strokeWidth="0.8" />
+
+                <g className="cursor-pointer" onClick={(e) => { e.stopPropagation(); setSelectedId(isSelected ? null : agent.id); }}>
+                  {agent.status === "active" && (
+                    <circle cx={ax} cy={ay} r="16" fill="none" stroke={color} strokeWidth="0.5" opacity="0.4">
+                      <animate attributeName="r" values="14;18;14" dur="2s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0.4;0.1;0.4" dur="2s" repeatCount="indefinite" />
+                    </circle>
+                  )}
+                  <circle cx={ax} cy={ay} r="10" fill="rgba(15,16,24,0.9)" stroke={isSelected ? "#818cf8" : color} strokeWidth={isSelected ? 1.5 : 0.8} />
+                  <circle cx={ax} cy={ay} r="3" fill={color} opacity="0.8" />
+
+                  <text x={ax + 18} y={ay - 2} className="text-[5px] font-mono font-bold" fill="rgba(255,255,255,0.6)">{label}</text>
+                  <text x={ax + 18} y={ay + 7} className="text-[4px] font-mono" fill="rgba(255,255,255,0.3)">
+                    {agent.status === "active" ? elapsed(agent.startTime) : `${events.length} events`}
+                  </text>
+                </g>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {showPanel && (
+        <div className="w-[40%] h-full border-l border-white/[0.08] flex flex-col" style={{ background: "rgba(6,7,12,0.95)" }}>
+          <div className="flex items-center justify-between px-3 py-2.5 border-b border-white/[0.06]">
+            <div className="flex items-center gap-2">
+              {selectedId === "root" ? (
+                <span className="text-[9px] font-sans font-bold text-indigo-300">Session Overview</span>
+              ) : (
+                <>
+                  <div className="w-2 h-2 rounded-full" style={{ background: statusColor(selected?.status || "done") }} />
+                  <span className="text-[9px] font-sans font-bold text-txt-primary">{selected?.type || selected?.desc || "Agent"}</span>
+                  <span className={`text-[7px] font-mono px-1.5 py-0.5 rounded-full ${selected?.status === "active" ? "bg-green-500/15 text-green-300" : selected?.status === "failed" ? "bg-red-500/15 text-red-300" : "bg-indigo-500/15 text-indigo-300"}`}>
+                    {selected?.status || "done"}
+                  </span>
+                </>
+              )}
+            </div>
+            <button onClick={() => setSelectedId(null)} className="text-txt-tertiary hover:text-txt-secondary transition-colors">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+            </button>
+          </div>
+
+          {selectedId === "root" ? (
+            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-lg border border-white/[0.06] px-2.5 py-2" style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <span className="text-[7px] font-sans font-bold tracking-wider uppercase text-txt-tertiary">Tokens</span>
+                  <p className="text-[11px] font-mono font-bold text-indigo-300 mt-0.5">{(metrics.tokens.input + metrics.tokens.output) >= 1000 ? `${((metrics.tokens.input + metrics.tokens.output) / 1000).toFixed(1)}k` : metrics.tokens.input + metrics.tokens.output}</p>
+                </div>
+                <div className="rounded-lg border border-white/[0.06] px-2.5 py-2" style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <span className="text-[7px] font-sans font-bold tracking-wider uppercase text-txt-tertiary">Cost</span>
+                  <p className="text-[11px] font-mono font-bold text-emerald-300 mt-0.5">${metrics.cost.toFixed(2)}</p>
+                </div>
+                <div className="rounded-lg border border-white/[0.06] px-2.5 py-2" style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <span className="text-[7px] font-sans font-bold tracking-wider uppercase text-txt-tertiary">Agents</span>
+                  <p className="text-[11px] font-mono font-bold text-cyan-300 mt-0.5">{allAgents.length}</p>
+                </div>
+                <div className="rounded-lg border border-white/[0.06] px-2.5 py-2" style={{ background: "rgba(255,255,255,0.02)" }}>
+                  <span className="text-[7px] font-sans font-bold tracking-wider uppercase text-txt-tertiary">Turns</span>
+                  <p className="text-[11px] font-mono font-bold text-violet-300 mt-0.5">{metrics.turns}</p>
+                </div>
+              </div>
+              <div>
+                <span className="text-[7px] font-sans font-bold tracking-wider uppercase text-txt-tertiary">All Agents</span>
+                <div className="mt-2 space-y-1">
+                  {allAgents.map(a => (
+                    <div key={a.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-white/[0.03] cursor-pointer" onClick={() => setSelectedId(a.id)}>
+                      <div className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor(a.status) }} />
+                      <span className="text-[8px] font-mono text-txt-secondary flex-1 truncate">{a.type || a.desc || "agent"}</span>
+                      <span className="text-[7px] font-mono text-txt-tertiary">{a.status}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : selected ? (
+            <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="text-[8px] font-mono text-txt-tertiary">{elapsed(selected.startTime)}</div>
+                <div className="text-[8px] font-mono text-txt-tertiary">{(agentEvents[selected.id] || []).length} events</div>
+              </div>
+              {selected.desc && <p className="text-[8px] font-mono text-txt-secondary">{selected.desc}</p>}
+              <div>
+                <span className="text-[7px] font-sans font-bold tracking-wider uppercase text-txt-tertiary">Activity</span>
+                <div className="mt-2 space-y-1 max-h-[300px] overflow-y-auto">
+                  {(agentEvents[selected.id] || []).length === 0 && <p className="text-[8px] font-mono text-txt-tertiary">No events yet</p>}
+                  {(agentEvents[selected.id] || []).map((ev, i) => (
+                    <div key={i} className="px-2 py-1.5 rounded-md border border-white/[0.04]" style={{ background: "rgba(255,255,255,0.02)" }}>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-[7px] font-mono ${ev.role === "assistant" ? "text-indigo-300/60" : "text-cyan-300/60"}`}>{ev.role}</span>
+                        {ev.timestamp && <span className="text-[6px] font-mono text-txt-tertiary">{new Date(ev.timestamp).toLocaleTimeString()}</span>}
+                      </div>
+                      {ev.text && <p className="text-[8px] font-mono text-txt-secondary mt-0.5 line-clamp-3">{typeof ev.text === "string" ? ev.text.slice(0, 200) : ""}</p>}
+                      {ev.toolUses && ev.toolUses.length > 0 && (
+                        <div className="mt-0.5 flex flex-wrap gap-1">
+                          {ev.toolUses.map((tu, j) => (
+                            <span key={j} className="text-[6px] font-mono px-1 py-0.5 rounded bg-indigo-500/10 text-indigo-300/60">{tu.tool}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {selected.result && (
+                <div>
+                  <span className="text-[7px] font-sans font-bold tracking-wider uppercase text-txt-tertiary">Result</span>
+                  <div className="mt-1 px-2 py-1.5 rounded-md border border-white/[0.04]" style={{ background: "rgba(255,255,255,0.02)" }}>
+                    <p className="text-[8px] font-mono text-txt-secondary whitespace-pre-wrap">{selected.result.slice(0, 500)}{selected.result.length > 500 ? "..." : ""}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const HOURLY_CAP = 60;
 
 function Sidebar({ metrics, model, session, onReset, fileTargets, onCycleTarget, snipedCount, hardwareMetrics }: { metrics: Metrics; model: string; session: SessionInfo | null; onReset?: () => void; fileTargets?: Record<string, string>; onCycleTarget?: (file: string) => void; snipedCount?: number; hardwareMetrics?: HwMetrics | null }) {
@@ -2125,9 +2355,13 @@ export default function Dashboard() {
             )}
             {activeView === "agents" && (
               <motion.div key="agents-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="flex-1 min-h-0">
-                <div className="flex items-center justify-center h-full">
-                  <p className="text-[11px] font-sans text-txt-tertiary">Agents view loading...</p>
-                </div>
+                <AgentsView
+                  activeAgents={metrics.activeSubagents || []}
+                  completedAgents={completedAgents}
+                  agentEvents={agentEvents}
+                  session={session}
+                  metrics={metrics}
+                />
               </motion.div>
             )}
             {activeView === "monitor" && (
