@@ -1891,6 +1891,24 @@ function formatDuration(ms: number): string { const s = Math.floor(ms / 1000), m
 const MAX_CARDS = 60;
 const defaultMetrics: Metrics = { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, turns: 0, toolCalls: 0, elapsed: 0, velocity: 0, startTime: Date.now(), hourlyTurns: 0, topFiles: [], errorCount: 0, activeSubagents: [], plan: undefined, modelBreakdown: [], usage: undefined };
 
+interface AgentNode {
+  id: string;
+  type: string;
+  desc: string;
+  startTime: string;
+  background?: boolean;
+  status: "active" | "done" | "failed";
+  result?: string;
+  isError?: boolean;
+}
+
+interface AgentEvent {
+  role: string;
+  text?: string;
+  toolUses?: { tool: string; input?: Record<string, unknown> }[];
+  timestamp?: string;
+}
+
 interface HwMetrics {
   cpu: { percent: number };
   memory: { usedGB: number; totalGB: number; percent: number };
@@ -1914,6 +1932,8 @@ export default function Dashboard() {
   const [fileTargets, setFileTargets] = useState<Record<string, "neutral" | "snipe" | "focus">>({});
   const [hardwareMetrics, setHardwareMetrics] = useState<HwMetrics | null>(null);
   const [hardwareHistory, setHardwareHistory] = useState<HwMetrics[]>([]);
+  const [completedAgents, setCompletedAgents] = useState<AgentNode[]>([]);
+  const [agentEvents, setAgentEvents] = useState<Record<string, AgentEvent[]>>({});
   const [settings, updateSettings, resetSettings] = useSettings();
   const feedRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
@@ -2010,10 +2030,31 @@ export default function Dashboard() {
       setTimeout(scrollBottom, 80);
     });
 
-    s.on("subagent_event", (ev: SessionEvent) => {
+    s.on("subagent_event", (ev: SessionEvent & { toolUseId?: string; agentId?: string }) => {
       const newCards = eventToCards(ev); if (!newCards.length) return;
       setCards(p => { const combined = [...p, ...newCards]; return combined.length > MAX_CARDS ? combined.slice(-MAX_CARDS) : combined; });
       setTimeout(scrollBottom, 80);
+      const agentKey = ev.toolUseId || ev.agentId || "";
+      if (agentKey) {
+        setAgentEvents(prev => {
+          const events = prev[agentKey] || [];
+          const newEvent: AgentEvent = { role: ev.role || "", text: ev.text?.join("\n"), toolUses: ev.toolUses?.map(t => ({ tool: t.tool, input: t.input as Record<string, unknown> | undefined })), timestamp: ev.timestamp };
+          const updated = [...events, newEvent];
+          return { ...prev, [agentKey]: updated.length > 50 ? updated.slice(-50) : updated };
+        });
+      }
+    });
+
+    s.on("subagent_end", (data: { id: string; type?: string; desc?: string; startTime?: string; result?: string; isError?: boolean }) => {
+      setCompletedAgents(prev => [...prev, {
+        id: data.id,
+        type: data.type || "",
+        desc: data.desc || "",
+        startTime: data.startTime || new Date().toISOString(),
+        status: data.isError ? "failed" : "done",
+        result: data.result,
+        isError: data.isError,
+      }]);
     });
 
     s.on("pinned_errors", (errs: PinnedError[]) => setPinnedErrors(errs));
