@@ -79,6 +79,45 @@ html, body {
   border-bottom-style: solid;
 }
 
+@keyframes scope-enter {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+.scope-entrance {
+  animation: scope-enter 400ms ease-out both;
+}
+
+@keyframes thinking-breathe {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.08), 0 0 8px rgba(34, 211, 238, 0.05); }
+  50% { box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.25), 0 0 16px rgba(34, 211, 238, 0.12); }
+}
+.cmd-thinking {
+  animation: thinking-breathe 2s ease-in-out infinite;
+}
+
+@keyframes permission-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12), 0 0 10px rgba(251, 191, 36, 0.06); }
+  50% { box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.35), 0 0 20px rgba(251, 191, 36, 0.15); }
+}
+.cmd-permission {
+  animation: permission-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes gauge-fill {
+  from { width: 0; }
+}
+.gauge-bar {
+  animation: gauge-fill 0.6s ease-out;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.gauge-pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
 @keyframes highlight-pulse {
   0% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.4); }
   50% { box-shadow: 0 0 0 4px rgba(129, 140, 248, 0.15); }
