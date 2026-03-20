@@ -5,12 +5,16 @@ import path from "path";
 import os from "os";
 import { findNewestSession, findSubagentLogs, parseSubagentSummary, parseLine, extractEvent } from "./src/parser.js";
 import { getUsage, updateUsage, checkLogEntryForUsage } from "./src/usage-cache.js";
+import { parseDependencies } from "./src/dependency-parser.js";
 
 const PORT = 3778;
 const claudeDir = path.join(os.homedir(), ".claude");
 const projectsDir = path.join(claudeDir, "projects");
 const REPLAY_WINDOW_MS = 5 * 60 * 1000;
 const LIVE_THRESHOLD_MS = 60 * 1000;
+
+let depCache = null;
+let depCacheTime = 0;
 
 const projectStates = new Map();
 
@@ -112,6 +116,17 @@ const httpServer = createServer((req, res) => {
     const tree = scanDir(targetDir);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ root: path.basename(targetDir), tree }));
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/scan-dependencies") {
+    const now = Date.now();
+    if (!depCache || now - depCacheTime > 10000) {
+      depCache = parseDependencies(path.resolve("."));
+      depCacheTime = now;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(depCache));
     return;
   }
 
