@@ -1147,6 +1147,23 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
     return counts;
   }, [depEdges]);
 
+  const activityScores = useMemo(() => {
+    if (!activityLayer) return {};
+    const scores: Record<string, number> = {};
+    const now = Date.now();
+    for (const card of cards) {
+      if (!card.filename) continue;
+      const age = now - new Date(card.timestamp).getTime();
+      const decay = age > 300000 ? 0.25 : age > 120000 ? 0.5 : 1;
+      const weight = card.kind === "code" ? 3 : card.kind === "read" ? 1 : card.kind === "tool" ? 1 : 0;
+      const key = card.filename;
+      scores[key] = (scores[key] || 0) + weight * decay;
+      const shortName = key.includes("/") ? key.split("/").pop()! : key;
+      if (shortName !== key) scores[shortName] = (scores[shortName] || 0) + weight * decay;
+    }
+    return scores;
+  }, [activityLayer, cards]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => { setDragging(true); dragStart.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y }; }, [offset]);
   const handleMouseMove = useCallback((e: React.MouseEvent) => { if (!dragging) return; setOffset({ x: dragStart.current.ox + (e.clientX - dragStart.current.x), y: dragStart.current.oy + (e.clientY - dragStart.current.y) }); }, [dragging]);
   const handleMouseUp = useCallback(() => setDragging(false), []);
@@ -1215,7 +1232,7 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
             const my = (a.y + b.y) / 2 + (b.x - a.x) * 0.15;
             const color = edge.edgeType === "require" ? "rgba(34, 211, 238, 0.3)" : edge.edgeType === "css-import" ? "rgba(192, 132, 252, 0.3)" : "rgba(129, 140, 248, 0.3)";
             const markerId = edge.edgeType === "require" ? "arrow-require" : edge.edgeType === "css-import" ? "arrow-css" : "arrow-import";
-            return <path key={`dep-${i}`} d={`M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`} fill="none" stroke={color} strokeWidth={isHovered ? 1.2 : 0.5} opacity={isHovered ? 1 : 0.5} markerEnd={`url(#${markerId})`} />;
+            return <path key={`dep-${i}`} d={`M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`} fill="none" stroke={color} strokeWidth={isHovered ? 1.2 : (activityLayer && activityScores[edge.from] && activityScores[edge.to] ? 1 : 0.5)} opacity={isHovered ? 1 : (activityLayer && (activityScores[edge.from] || activityScores[edge.to]) ? 0.8 : 0.5)} markerEnd={`url(#${markerId})`} />;
           }
           return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(129, 140, 248, 0.12)" strokeWidth="0.5" />;
         })}
@@ -1239,6 +1256,11 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
               {(isRecent || isFocus) && <circle cx={node.x} cy={node.y} r={nodeRadius + 4} fill={isFocus ? "rgba(251,191,36,0.15)" : "rgba(129,140,248,0.15)"} opacity="0.8">
                 <animate attributeName="r" values={`${nodeRadius + 3};${nodeRadius + 6};${nodeRadius + 3}`} dur="2.5s" repeatCount="indefinite" />
               </circle>}
+              {activityLayer && (activityScores[node.id] || activityScores[node.name] || 0) > 0 && (
+                <circle cx={node.x} cy={node.y} r={nodeRadius + 6} fill="none" stroke="rgba(251, 191, 36, 0.3)" strokeWidth="1.5" opacity={Math.min((activityScores[node.id] || activityScores[node.name] || 0) / 10, 1)}>
+                  <animate attributeName="opacity" values={`${Math.min((activityScores[node.id] || activityScores[node.name] || 0) / 10, 1)};${Math.min((activityScores[node.id] || activityScores[node.name] || 0) / 15, 0.6)};${Math.min((activityScores[node.id] || activityScores[node.name] || 0) / 10, 1)}`} dur="2s" repeatCount="indefinite" />
+                </circle>
+              )}
               <circle cx={node.x} cy={node.y} r={nodeRadius} fill={isDir ? "rgba(30,32,45,0.9)" : "rgba(20,22,30,0.85)"}
                 stroke={isHov ? "#818cf8" : stroke} strokeWidth={isHov ? 1.2 : 0.6} opacity={isSniped ? 0.2 : 1} />
               {isDir && collapsed.has(node.id) && <text x={node.x} y={node.y + 2} textAnchor="middle" className="text-[4px]" fill="rgba(255,255,255,0.3)">+</text>}
