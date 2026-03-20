@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { io, Socket } from "socket.io-client";
 
@@ -365,7 +366,8 @@ function MentorTooltipPortal({ targetEl, term, onLearnMore, onClose }: {
         animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
         exit={{ opacity: 0, scale: 0.95, filter: "blur(6px)" }}
         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-        className="fixed z-[200] rounded-l-xl border border-r-0 pointer-events-none"
+        onMouseLeave={onClose}
+        className="fixed z-[200] rounded-l-xl border border-r-0 pointer-events-auto no-drag"
         style={{
           width: panelW,
           left: panelLeft,
@@ -694,7 +696,7 @@ function CodeLines({ code, maxLines, showLineNums, startLine = 1, isNewFile, onL
   }, []);
 
   return (
-    <pre className="text-[10px] font-mono leading-[1.75] whitespace-pre-wrap relative" onMouseOver={handleMouseOver} onMouseOut={handleMouseOut}>
+    <pre className="text-[10px] font-mono leading-[1.75] whitespace-pre-wrap relative no-drag" onMouseOver={handleMouseOver} onMouseOut={handleMouseOut}>
       {display.map((line, i) => (
         <div key={i} className={`flex items-start ${isNewFile ? "bg-green-500/[0.05] border-l-2 border-green-500/20 px-1.5 -mx-1.5 rounded" : ""}`}>
           {showLineNums && <span className={`select-none text-right mr-2 shrink-0 tabular-nums ${isNewFile ? "text-green-400/30" : "text-txt-tertiary"}`} style={{ width: `${gutterW}ch` }}>{startLine + i}</span>}
@@ -703,9 +705,12 @@ function CodeLines({ code, maxLines, showLineNums, startLine = 1, isNewFile, onL
         </div>
       ))}
       {lines.length > maxLines && <div className="text-txt-tertiary mt-1 text-[9px]">...{lines.length - maxLines} more lines from L{startLine + maxLines}</div>}
-      <AnimatePresence>
-        {hoveredEl && <MentorTooltipPortal targetEl={hoveredEl.el} term={hoveredEl.term} onLearnMore={onLearnMore} onClose={() => setHoveredEl(null)} />}
-      </AnimatePresence>
+      {typeof document !== "undefined" && createPortal(
+        <AnimatePresence>
+          {hoveredEl && <MentorTooltipPortal targetEl={hoveredEl.el} term={hoveredEl.term} onLearnMore={onLearnMore} onClose={() => setHoveredEl(null)} />}
+        </AnimatePresence>,
+        document.body
+      )}
     </pre>
   );
 }
@@ -740,7 +745,7 @@ function DiffLines({ removed, added, maxLines, showLineNums, startLine = 1, onLe
   }, []);
 
   return (
-    <pre className="text-[10px] font-mono leading-[1.75] whitespace-pre-wrap relative" onMouseOver={handleMouseOver} onMouseOut={handleMouseOut}>
+    <pre className="text-[10px] font-mono leading-[1.75] whitespace-pre-wrap relative no-drag" onMouseOver={handleMouseOver} onMouseOut={handleMouseOut}>
       {rmShow.map((line, i) => (
         <div key={`r${i}`} className="flex items-start bg-red-500/[0.08] px-1.5 -mx-1.5 rounded border-l-2 border-red-500/30">
           <span className="select-none text-red-400/30 text-right mr-2 shrink-0 tabular-nums" style={{ width: `${gutterW}ch` }}>{startLine + i}</span>
@@ -759,9 +764,12 @@ function DiffLines({ removed, added, maxLines, showLineNums, startLine = 1, onLe
       {(rmLines.length > rmShow.length || adLines.length > adShow.length) && (
         <div className="text-txt-tertiary mt-1 text-[9px]">...truncated from L{startLine + Math.max(rmShow.length, adShow.length)}</div>
       )}
-      <AnimatePresence>
-        {hoveredEl && <MentorTooltipPortal targetEl={hoveredEl.el} term={hoveredEl.term} onLearnMore={onLearnMore} onClose={() => setHoveredEl(null)} />}
-      </AnimatePresence>
+      {typeof document !== "undefined" && createPortal(
+        <AnimatePresence>
+          {hoveredEl && <MentorTooltipPortal targetEl={hoveredEl.el} term={hoveredEl.term} onLearnMore={onLearnMore} onClose={() => setHoveredEl(null)} />}
+        </AnimatePresence>,
+        document.body
+      )}
     </pre>
   );
 }
@@ -1235,7 +1243,7 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
 
 const HOURLY_CAP = 60;
 
-function Sidebar({ metrics, model, session, onReset, fileTargets, onCycleTarget, snipedCount }: { metrics: Metrics; model: string; session: SessionInfo | null; onReset?: () => void; fileTargets?: Record<string, string>; onCycleTarget?: (file: string) => void; snipedCount?: number }) {
+function Sidebar({ metrics, model, session, onReset, fileTargets, onCycleTarget, snipedCount, hardwareMetrics }: { metrics: Metrics; model: string; session: SessionInfo | null; onReset?: () => void; fileTargets?: Record<string, string>; onCycleTarget?: (file: string) => void; snipedCount?: number; hardwareMetrics?: HwMetrics | null }) {
   const totalTok = metrics.tokens.input + metrics.tokens.output;
   const hourlyPct = Math.min((metrics.hourlyTurns / HOURLY_CAP) * 100, 100);
   const costWarning = metrics.cost >= 5;
@@ -1253,7 +1261,8 @@ function Sidebar({ metrics, model, session, onReset, fileTargets, onCycleTarget,
   const usageSource = usage?.source || "none";
 
   return (
-    <div className="w-full h-full flex flex-col py-4 px-3 gap-4 overflow-y-auto" style={{ background: "var(--sidebar-bg)", backdropFilter: "blur(50px) saturate(160%)" }}>
+    <div className="w-full h-full flex flex-col" style={{ background: "var(--sidebar-bg)", backdropFilter: "blur(50px) saturate(160%)" }}>
+      <div className="flex-1 overflow-y-auto py-4 px-3 gap-4 flex flex-col">
 
       <div className="text-center space-y-1.5">
         <div className="flex items-center justify-center gap-1.5">
@@ -1395,6 +1404,44 @@ function Sidebar({ metrics, model, session, onReset, fileTargets, onCycleTarget,
           </button>
         )}
       </div>
+      </div>
+      {hardwareMetrics && (
+        <div className="shrink-0 border-t border-white/[0.06] px-3 py-3">
+          <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary mb-2 block">SYSTEM</span>
+          <div className="space-y-2">
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[8px] font-mono text-cyan-300/70">CPU</span>
+                <span className="text-[8px] font-mono text-txt-secondary tabular-nums">{hardwareMetrics.cpu.percent}%</span>
+              </div>
+              <div className="h-[4px] rounded-full bg-white/[0.06] overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-400 gauge-bar" style={{ width: `${hardwareMetrics.cpu.percent}%` }} />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[8px] font-mono text-indigo-300/70">MEM</span>
+                <span className="text-[8px] font-mono text-txt-secondary tabular-nums">{hardwareMetrics.memory.usedGB}/{hardwareMetrics.memory.totalGB} GB</span>
+              </div>
+              <div className="h-[4px] rounded-full bg-white/[0.06] overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-indigo-400 gauge-bar" style={{ width: `${hardwareMetrics.memory.percent}%` }} />
+              </div>
+            </div>
+            {hardwareMetrics.gpu?.available && (
+              <div>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[8px] font-mono text-emerald-300/70">GPU</span>
+                  <span className="text-[8px] font-mono text-txt-secondary tabular-nums">{hardwareMetrics.gpu.utilPercent}%</span>
+                </div>
+                <div className="h-[4px] rounded-full bg-white/[0.06] overflow-hidden">
+                  <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 gauge-bar" style={{ width: `${hardwareMetrics.gpu.utilPercent}%` }} />
+                </div>
+              </div>
+            )}
+            <div className="text-[7px] font-mono text-txt-tertiary/50">{hardwareMetrics.processes.length} processes</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1614,6 +1661,228 @@ function SettingSlider({ value, min, max, step, label, onChange }: { value: numb
   );
 }
 
+function CommandBar() {
+  const [input, setInput] = useState("");
+  const [response, setResponse] = useState("");
+  const [rawOutput, setRawOutput] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("idle");
+  const [lastPrompt, setLastPrompt] = useState("");
+  const [showRaw, setShowRaw] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const responseRef = useRef<HTMLDivElement>(null);
+
+  type CmdAPI = {
+    sendPrompt: (t: string) => void;
+    sendToTerminal: (t: string) => void;
+    cancelCommand: () => void;
+    onPromptResponse: (cb: (d: { type: string; data?: string }) => void) => void;
+    removePromptResponse: () => void;
+    onFocusInput: (cb: () => void) => void;
+    removeFocusInput: () => void;
+    onStatusChange: (cb: (s: string) => void) => void;
+    removeStatusChange: () => void;
+  };
+
+  const getApi = () => (window as unknown as Record<string, CmdAPI>).electronAPI;
+
+  useEffect(() => {
+    const api = getApi();
+    if (!api) return;
+
+    api.onFocusInput(() => { inputRef.current?.focus(); });
+    api.onStatusChange((s) => { setStatus(s); });
+
+    api.onPromptResponse((msg) => {
+      if (msg.type === "start") {
+        setResponse("");
+        setRawOutput("");
+        setError("");
+        setLoading(true);
+      } else if (msg.type === "chunk") {
+        setResponse(prev => prev + (msg.data || ""));
+      } else if (msg.type === "raw") {
+        setRawOutput(prev => prev + (msg.data || ""));
+      } else if (msg.type === "error") {
+        setError(prev => prev + (msg.data || ""));
+      } else if (msg.type === "done") {
+        setLoading(false);
+        inputRef.current?.focus();
+      }
+    });
+
+    return () => {
+      api.removePromptResponse();
+      api.removeFocusInput();
+      api.removeStatusChange();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (responseRef.current) {
+      responseRef.current.scrollTop = responseRef.current.scrollHeight;
+    }
+  }, [response, rawOutput, error]);
+
+  const resizeTextarea = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 300) + "px";
+  }, []);
+
+  useEffect(() => { resizeTextarea(); }, [input, resizeTextarea]);
+
+  const send = () => {
+    const text = input.trim();
+    if (!text) return;
+    const api = getApi();
+    if (!api) return;
+
+    if (isPermission) {
+      api.sendToTerminal(text);
+      setInput("");
+      setStatus("streaming");
+      if (inputRef.current) inputRef.current.style.height = "auto";
+      return;
+    }
+
+    if (loading) return;
+    setResponse("");
+    setRawOutput("");
+    setError("");
+    setLastPrompt(text);
+    api.sendPrompt(text);
+    setInput("");
+    if (inputRef.current) inputRef.current.style.height = "auto";
+  };
+
+  const sendTerminal = (text: string) => {
+    const api = getApi();
+    if (!api) return;
+    api.sendToTerminal(text);
+    setStatus("streaming");
+  };
+
+  const cancel = () => {
+    const api = getApi();
+    if (!api) return;
+    api.cancelCommand();
+    setStatus("idle");
+    inputRef.current?.blur();
+  };
+
+  const isThinking = status === "thinking";
+  const isStreaming = status === "streaming";
+  const isPermission = status === "permission";
+  const displayContent = showRaw ? rawOutput : response;
+  const barClass = isPermission ? "cmd-permission" : isThinking ? "cmd-thinking" : "";
+
+  return (
+    <div className={`no-drag shrink-0 border-t border-white/[0.08] transition-all duration-300 ${barClass}`} style={{ background: "rgba(0, 0, 0, 0.40)", backdropFilter: "blur(24px) saturate(150%)" }}>
+      {(displayContent || error || loading) && (
+        <div ref={responseRef} className="px-3 pt-2 pb-1 max-h-[150px] overflow-y-auto">
+          {lastPrompt && (
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="text-[7px] font-sans font-bold tracking-[0.15em] uppercase text-indigo-400/50">PROMPT</span>
+              <span className="text-[9px] font-mono text-txt-tertiary truncate">{lastPrompt}</span>
+            </div>
+          )}
+          {displayContent && (
+            showRaw
+              ? <pre className="text-[8px] font-mono text-cyan-300/50 leading-relaxed whitespace-pre-wrap break-all">{displayContent}</pre>
+              : <p className="text-[9px] font-mono text-indigo-200/70 leading-relaxed whitespace-pre-wrap">{displayContent}</p>
+          )}
+          {error && <p className="text-[9px] font-mono text-red-400/70 leading-relaxed whitespace-pre-wrap">{error}</p>}
+          {isThinking && !displayContent && !error && (
+            <div className="flex items-center gap-2 py-1">
+              <div className="w-2.5 h-2.5 rounded-full border border-cyan-400/50 border-t-cyan-400 animate-spin" />
+              <span className="text-[8px] font-mono text-cyan-300/50">Thinking...</span>
+            </div>
+          )}
+          {isStreaming && loading && (
+            <div className="flex items-center gap-1 mt-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-indigo-400/60 animate-pulse" />
+            </div>
+          )}
+        </div>
+      )}
+      {isPermission && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-amber-400/10">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400/70 shrink-0">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <span className="text-[8px] font-sans font-bold tracking-[0.12em] uppercase text-amber-300/70">Permission Required</span>
+          <div className="flex-1" />
+          <button onClick={() => sendTerminal("y")}
+            className="px-2.5 py-1 rounded-md text-[8px] font-sans font-bold tracking-wider uppercase transition-all"
+            style={{ background: "rgba(74, 222, 128, 0.15)", border: "1px solid rgba(74, 222, 128, 0.20)", color: "rgba(134, 239, 172, 0.9)" }}>
+            Approve
+          </button>
+          <button onClick={() => sendTerminal("n")}
+            className="px-2.5 py-1 rounded-md text-[8px] font-sans font-bold tracking-wider uppercase transition-all"
+            style={{ background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.20)", color: "rgba(252, 165, 165, 0.9)" }}>
+            Deny
+          </button>
+        </div>
+      )}
+      <div className="flex items-end gap-2 px-3 py-2">
+        <div className="relative flex-1">
+          <textarea
+            ref={inputRef}
+            rows={1}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+              if (e.key === "Escape") { if (loading) cancel(); else inputRef.current?.blur(); }
+            }}
+            placeholder={isPermission ? "Type y/n or use buttons above..." : isThinking ? "Thinking..." : "Send a command...   Ctrl+K"}
+            className={`w-full px-3 py-1.5 rounded-lg text-[10px] font-mono text-txt-secondary placeholder:text-txt-tertiary outline-none transition-all focus:ring-1 resize-none overflow-hidden ${isPermission ? "focus:ring-amber-500/30 border-amber-500/20" : "focus:ring-indigo-500/30"} ${isThinking ? "border-cyan-500/20" : ""}`}
+            style={{ background: "rgba(255, 255, 255, 0.04)", border: `1px solid ${isPermission ? "rgba(251, 191, 36, 0.15)" : isThinking ? "rgba(34, 211, 238, 0.15)" : "rgba(255, 255, 255, 0.06)"}` }}
+          />
+          {loading && !isPermission && (
+            <div className="absolute right-2.5 bottom-2">
+              <div className={`w-3 h-3 rounded-full border animate-spin ${isThinking ? "border-cyan-400/50 border-t-cyan-400" : "border-indigo-400/50 border-t-indigo-400"}`} />
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => setShowRaw(!showRaw)}
+          className={`px-2 py-1.5 rounded-lg text-[9px] font-mono transition-all ${showRaw ? "text-cyan-300/80" : "text-txt-tertiary/50 hover:text-txt-tertiary"}`}
+          style={{ background: showRaw ? "rgba(34, 211, 238, 0.08)" : "transparent", border: `1px solid ${showRaw ? "rgba(34, 211, 238, 0.15)" : "rgba(255, 255, 255, 0.04)"}` }}
+          title="Toggle raw output"
+        >
+          {"</>"}
+        </button>
+        {loading ? (
+          <button
+            onClick={cancel}
+            className="px-3 py-1.5 rounded-lg transition-all"
+            style={{ background: "rgba(239, 68, 68, 0.20)", border: "1px solid rgba(239, 68, 68, 0.15)", color: "rgba(252, 165, 165, 0.9)" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            onClick={send}
+            disabled={!input.trim()}
+            className="px-3 py-1.5 rounded-lg transition-all disabled:opacity-30"
+            style={{ background: "rgba(99, 102, 241, 0.20)", border: "1px solid rgba(99, 102, 241, 0.15)", color: "rgba(165, 180, 252, 0.9)" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function StatusBar({ connected, onOpenSettings, activeView, onViewChange, updateStatus }: { connected: boolean; onOpenSettings: () => void; activeView: string; onViewChange: (v: string) => void; updateStatus: string }) {
   const eApi = () => (window as unknown as Record<string, Record<string, (...args: unknown[]) => void>>).electronAPI;
   const winMinimize = () => { eApi()?.minimize(); };
@@ -1687,6 +1956,13 @@ function formatDuration(ms: number): string { const s = Math.floor(ms / 1000), m
 const MAX_CARDS = 60;
 const defaultMetrics: Metrics = { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, turns: 0, toolCalls: 0, elapsed: 0, velocity: 0, startTime: Date.now(), hourlyTurns: 0, topFiles: [], errorCount: 0, activeSubagents: [], plan: undefined, modelBreakdown: [], usage: undefined };
 
+interface HwMetrics {
+  cpu: { percent: number };
+  memory: { usedGB: number; totalGB: number; percent: number };
+  gpu: { available: boolean; name?: string; utilPercent?: number; vramUsedMB?: number; vramTotalMB?: number; tempC?: number } | null;
+  processes: { pid: number; name: string; cpuPercent: number; memoryMB: number; parentPid: number }[];
+}
+
 export default function Dashboard() {
   const [connected, setConnected] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
@@ -1701,6 +1977,8 @@ export default function Dashboard() {
   const [activeView, setActiveView] = useState("feed");
   const [updateStatus, setUpdateStatus] = useState("idle");
   const [fileTargets, setFileTargets] = useState<Record<string, "neutral" | "snipe" | "focus">>({});
+  const [hardwareMetrics, setHardwareMetrics] = useState<HwMetrics | null>(null);
+  const [hardwareHistory, setHardwareHistory] = useState<HwMetrics[]>([]);
   const [settings, updateSettings, resetSettings] = useSettings();
   const feedRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
@@ -1807,7 +2085,17 @@ export default function Dashboard() {
     s.on("error_pinned", (err: PinnedError) => setPinnedErrors(p => [...p.slice(-9), err]));
     s.on("usage_updated", () => {});
 
-    return () => { s.disconnect(); };
+    const hwApi = (window as unknown as Record<string, Record<string, (...args: unknown[]) => void>>).electronAPI;
+    hwApi?.onHardwareMetrics?.((data: unknown) => {
+      const d = data as HwMetrics;
+      setHardwareMetrics(d);
+      setHardwareHistory(prev => {
+        const next = [...prev, d];
+        return next.length > 120 ? next.slice(-120) : next;
+      });
+    });
+
+    return () => { s.disconnect(); hwApi?.removeHardwareMetrics?.(); };
   }, [scrollBottom]);
 
   return (
@@ -1869,9 +2157,11 @@ export default function Dashboard() {
 
         <div className="w-[180px] shrink-0 h-full border-l border-white/[0.10] p-0 m-0 relative z-10"
              style={settings.sidebarShadows ? { boxShadow: "-20px 0 35px rgba(0,0,0,0.5), -8px 0 15px rgba(0,0,0,0.3)" } : undefined}>
-          <Sidebar metrics={metrics} model={model} session={session} onReset={() => socketRef.current?.emit("reset_stats")} fileTargets={fileTargets} onCycleTarget={cycleFileTarget} snipedCount={snipedFiles.length} />
+          <Sidebar metrics={metrics} model={model} session={session} onReset={() => socketRef.current?.emit("reset_stats")} fileTargets={fileTargets} onCycleTarget={cycleFileTarget} snipedCount={snipedFiles.length} hardwareMetrics={hardwareMetrics} />
         </div>
       </div>
+
+      <CommandBar />
 
       <AnimatePresence>
         {settingsOpen && <SettingsModal settings={settings} onUpdate={updateSettings} onReset={resetSettings} onClose={() => setSettingsOpen(false)} />}
