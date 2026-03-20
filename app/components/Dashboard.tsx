@@ -1164,6 +1164,20 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
     return scores;
   }, [activityLayer, cards]);
 
+  const flowPath = useMemo(() => {
+    if (!flowLayer) return [];
+    const steps: { nodeId: string; cardId: string; label: string }[] = [];
+    const recent = cards.slice(-20);
+    for (const card of recent) {
+      if (!card.filename) continue;
+      const matchNode = nodes.find(n => n.id === card.filename || n.name === card.filename);
+      if (!matchNode) continue;
+      const label = card.kind === "code" ? `Edit: ${card.filename}` : card.kind === "read" ? `Read: ${card.filename}` : `${card.toolName || card.kind}: ${card.filename}`;
+      steps.push({ nodeId: matchNode.id, cardId: card.id, label });
+    }
+    return steps;
+  }, [flowLayer, cards, nodes]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => { setDragging(true); dragStart.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y }; }, [offset]);
   const handleMouseMove = useCallback((e: React.MouseEvent) => { if (!dragging) return; setOffset({ x: dragStart.current.ox + (e.clientX - dragStart.current.x), y: dragStart.current.oy + (e.clientY - dragStart.current.y) }); }, [dragging]);
   const handleMouseUp = useCallback(() => setDragging(false), []);
@@ -1270,6 +1284,24 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
                 {node.name.length > 16 ? node.name.slice(0, 14) + ".." : node.name}
               </text>
               {isSniped && <line x1={node.x - nodeRadius} y1={node.y} x2={node.x + nodeRadius} y2={node.y} stroke="rgba(248,113,113,0.5)" strokeWidth="0.5" />}
+            </g>
+          );
+        })}
+        {flowLayer && flowPath.length > 1 && flowPath.map((step, i) => {
+          if (i === 0) return null;
+          const prev = nodes.find(n => n.id === flowPath[i - 1].nodeId);
+          const curr = nodes.find(n => n.id === step.nodeId);
+          if (!prev || !curr) return null;
+          const brightness = 0.3 + (i / flowPath.length) * 0.7;
+          return (
+            <g key={`flow-${i}`} className="cursor-pointer" onClick={(e) => { e.stopPropagation(); onJumpToCard(step.cardId); }}>
+              <line x1={prev.x} y1={prev.y} x2={curr.x} y2={curr.y}
+                stroke={`rgba(34, 211, 238, ${brightness})`} strokeWidth="1.5" strokeDasharray="4 3">
+                <animate attributeName="stroke-dashoffset" from="0" to="-7" dur="1s" repeatCount="indefinite" />
+              </line>
+              <circle cx={(prev.x + curr.x) / 2} cy={(prev.y + curr.y) / 2} r="5" fill="rgba(10,10,25,0.9)" stroke={`rgba(34, 211, 238, ${brightness})`} strokeWidth="0.8" />
+              <text x={(prev.x + curr.x) / 2} y={(prev.y + curr.y) / 2 + 1.5} textAnchor="middle" className="text-[3px] font-mono font-bold" fill={`rgba(34, 211, 238, ${brightness})`}>{i}</text>
+              <title>{step.label}</title>
             </g>
           );
         })}
