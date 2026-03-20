@@ -1195,6 +1195,18 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
     setCollapsed(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   }, []);
 
+  const dirLanes = useMemo(() => {
+    const lanes: { id: string; name: string; x: number; yMin: number; yMax: number }[] = [];
+    const dirs = nodes.filter(n => n.type === "dir");
+    for (const dir of dirs) {
+      const children = nodes.filter(n => n.parentDir === dir.id);
+      if (children.length === 0) continue;
+      const allY = [dir.y, ...children.map(c => c.y)];
+      lanes.push({ id: dir.id, name: dir.name, x: dir.x, yMin: Math.min(...allY) - 8, yMax: Math.max(...allY) + NODE_H + 8 });
+    }
+    return lanes;
+  }, [nodes]);
+
   if (nodes.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -1213,18 +1225,6 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
   const padX = 20, padY = 20;
   const vbW = Math.max(...nodes.map(n => n.x + NODE_W), 400) + padX * 2;
   const vbH = Math.max(...nodes.map(n => n.y + NODE_H), 300) + padY * 2;
-
-  const dirLanes = useMemo(() => {
-    const lanes: { id: string; name: string; x: number; yMin: number; yMax: number }[] = [];
-    const dirs = nodes.filter(n => n.type === "dir");
-    for (const dir of dirs) {
-      const children = nodes.filter(n => n.parentDir === dir.id);
-      if (children.length === 0) continue;
-      const allY = [dir.y, ...children.map(c => c.y)];
-      lanes.push({ id: dir.id, name: dir.name, x: dir.x, yMin: Math.min(...allY) - 8, yMax: Math.max(...allY) + NODE_H + 8 });
-    }
-    return lanes;
-  }, [nodes]);
 
   return (
     <div className="w-full h-full relative overflow-hidden cursor-grab active:cursor-grabbing"
