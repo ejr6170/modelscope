@@ -1018,7 +1018,7 @@ function LeftSidebar({ projects, activeProjectId, onSelect, cards, onJumpToCard,
 
 interface DirEntry { name: string; path: string; type: "file" | "dir"; ext?: string; lines?: number; children?: DirEntry[]; }
 interface MapNode { id: string; name: string; ext: string; type: "file" | "dir"; lines: number; x: number; y: number; parentDir: string; }
-interface MapEdge { from: string; to: string; }
+interface MapEdge { from: string; to: string; edgeType?: string; }
 
 const extColor = (ext: string) => {
   if (ext === "tsx" || ext === "ts") return "#7dd3fc";
@@ -1053,6 +1053,10 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
   const [zoom, setZoom] = useState(1);
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
+  const [depEdges, setDepEdges] = useState<MapEdge[]>([]);
+  const [depsLayer, setDepsLayer] = useState(true);
+  const [activityLayer, setActivityLayer] = useState(false);
+  const [flowLayer, setFlowLayer] = useState(false);
 
   const recentFiles = useMemo(() => {
     const recent = new Set<string>();
@@ -1069,6 +1073,18 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
   }, []);
 
   useEffect(() => { fetchTree(); }, [fetchTree]);
+
+  useEffect(() => {
+    fetch("http://localhost:3778/scan-dependencies")
+      .then(r => r.json())
+      .then(data => {
+        const edges: MapEdge[] = (data.edges || []).map((e: { from: string; to: string; edgeType?: string }) => ({
+          from: e.from, to: e.to, edgeType: e.edgeType,
+        }));
+        setDepEdges(edges);
+      })
+      .catch(() => {});
+  }, []);
 
   const { nodes, edges } = useMemo(() => {
     const flat = flattenTree(tree);
@@ -1123,6 +1139,14 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
     return { nodes: visible, edges: visibleEdges };
   }, [tree, collapsed]);
 
+  const incomingCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const e of depEdges) {
+      counts[e.to] = (counts[e.to] || 0) + 1;
+    }
+    return counts;
+  }, [depEdges]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => { setDragging(true); dragStart.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y }; }, [offset]);
   const handleMouseMove = useCallback((e: React.MouseEvent) => { if (!dragging) return; setOffset({ x: dragStart.current.ox + (e.clientX - dragStart.current.x), y: dragStart.current.oy + (e.clientY - dragStart.current.y) }); }, [dragging]);
   const handleMouseUp = useCallback(() => setDragging(false), []);
@@ -1169,10 +1193,30 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
           return <rect key={`cluster-${dir.id}`} x={clX} y={clY} width={clW} height={clH} rx="6" fill="rgba(99, 102, 241, 0.03)" stroke="rgba(99, 102, 241, 0.08)" strokeWidth="0.5" />;
         })}
 
-        {edges.map((edge, i) => {
+        <defs>
+          <marker id="arrow-import" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(129, 140, 248, 0.4)" />
+          </marker>
+          <marker id="arrow-require" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(34, 211, 238, 0.4)" />
+          </marker>
+          <marker id="arrow-css" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(192, 132, 252, 0.4)" />
+          </marker>
+        </defs>
+
+        {(depsLayer ? depEdges : edges).map((edge, i) => {
           const a = nodes.find(n => n.id === edge.from);
           const b = nodes.find(n => n.id === edge.to);
           if (!a || !b) return null;
+          const isHovered = hoveredNode === edge.from || hoveredNode === edge.to;
+          if (depsLayer) {
+            const mx = (a.x + b.x) / 2 + (a.y - b.y) * 0.15;
+            const my = (a.y + b.y) / 2 + (b.x - a.x) * 0.15;
+            const color = edge.edgeType === "require" ? "rgba(34, 211, 238, 0.3)" : edge.edgeType === "css-import" ? "rgba(192, 132, 252, 0.3)" : "rgba(129, 140, 248, 0.3)";
+            const markerId = edge.edgeType === "require" ? "arrow-require" : edge.edgeType === "css-import" ? "arrow-css" : "arrow-import";
+            return <path key={`dep-${i}`} d={`M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`} fill="none" stroke={color} strokeWidth={isHovered ? 1.2 : 0.5} opacity={isHovered ? 1 : 0.5} markerEnd={`url(#${markerId})`} />;
+          }
           return <line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="rgba(129, 140, 248, 0.12)" strokeWidth="0.5" />;
         })}
 
@@ -1183,7 +1227,8 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
           const target = fileTargets[node.id] || fileTargets[node.name] || "neutral";
           const isSniped = target === "snipe";
           const isFocus = target === "focus";
-          const nodeRadius = isDir ? 8 : 5;
+          const inc = incomingCounts[node.id] || 0;
+          const nodeRadius = isDir ? 8 : Math.min(5 + inc * 1.5, 14);
           const stroke = isDir ? "rgba(255,255,255,0.15)" : extColor(node.ext);
 
           return (
@@ -1227,9 +1272,21 @@ function LogicMap({ cards, fileTargets, onJumpToCard }: { cards: FeedCard[]; fil
         </div>
       )}
 
-      <button onClick={fetchTree} className="absolute top-2 right-2 w-6 h-6 flex items-center justify-center rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-txt-tertiary hover:text-indigo-400 transition-colors" title="Refresh tree">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
-      </button>
+      <div className="absolute top-2 right-2 flex items-center gap-1">
+        {[
+          { id: "deps", label: "DEPS", active: depsLayer, toggle: () => setDepsLayer(v => !v) },
+          { id: "activity", label: "ACTIVITY", active: activityLayer, toggle: () => setActivityLayer(v => !v) },
+          { id: "flow", label: "FLOW", active: flowLayer, toggle: () => setFlowLayer(v => !v) },
+        ].map(btn => (
+          <button key={btn.id} onClick={btn.toggle}
+            className={`px-2 py-1 rounded-md text-[7px] font-sans font-bold tracking-[0.15em] uppercase transition-all ${btn.active ? "bg-indigo-500/25 text-white" : "bg-white/[0.04] text-txt-tertiary hover:text-txt-secondary"}`}>
+            {btn.label}
+          </button>
+        ))}
+        <button onClick={fetchTree} className="w-6 h-6 flex items-center justify-center rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-txt-tertiary hover:text-indigo-400 transition-colors" title="Refresh">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+        </button>
+      </div>
 
       <div className="absolute top-2 left-2 flex gap-2 text-[6px] font-mono text-txt-tertiary pointer-events-none">
         <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full" style={{ background: "#7dd3fc" }} />TS</span>
