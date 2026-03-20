@@ -86,7 +86,10 @@ export default class HardwareMonitor {
   }
 
   _getGpu() {
-    if (!this._gpuDetected || !this._gpuCmd) return null;
+    if (!this._gpuDetected) {
+      this._detectGpu();
+      if (!this._gpuDetected) return null;
+    }
     try {
       if (this._gpuCmd.includes("nvidia-smi")) {
         const out = execSync(
@@ -112,7 +115,15 @@ export default class HardwareMonitor {
           return { available: true, name: "AMD GPU", utilPercent: 0, vramUsedMB: 0, vramTotalMB: 0, tempC: 0 };
         }
       }
+      if (this._gpuCmd.includes("xpu-smi")) {
+        try {
+          const out = execSync("xpu-smi stats", { stdio: "pipe", timeout: 3000, encoding: "utf8" });
+          return { available: true, name: "Intel GPU", utilPercent: 0, vramUsedMB: 0, vramTotalMB: 0, tempC: 0 };
+        } catch { return null; }
+      }
     } catch {
+      this._gpuDetected = false;
+      this._gpuCmd = null;
       return null;
     }
     return null;
