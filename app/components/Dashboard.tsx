@@ -1579,67 +1579,66 @@ function SettingSlider({ value, min, max, step, label, onChange }: { value: numb
 
 function CommandBar() {
   const [input, setInput] = useState("");
-  const [response, setResponse] = useState("");
-  const [rawOutput, setRawOutput] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState("idle");
-  const [lastPrompt, setLastPrompt] = useState("");
-  const [showRaw, setShowRaw] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [status, setStatus] = useState<"none" | "working" | "error">("none");
+  const [sessionActive, setSessionActive] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const responseRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
 
-  type CmdAPI = {
-    sendPrompt: (t: string) => void;
-    sendToTerminal: (t: string) => void;
-    cancelCommand: () => void;
-    onPromptResponse: (cb: (d: { type: string; data?: string }) => void) => void;
-    removePromptResponse: () => void;
+  type StreamAPI = {
+    sendStreamPrompt: (t: string) => void;
+    cancelStream: () => void;
+    endStreamSession: () => void;
+    onStreamEvent: (cb: (d: { type: string; content?: { type: string; text?: string; name?: string; input?: Record<string, unknown> }[]; tokens?: { input: number; output: number; cacheRead: number; cacheCreation: number }; model?: string; totalCost?: number; durationMs?: number; isError?: boolean; result?: string; exitCode?: number }) => void) => void;
+    removeStreamEvent: () => void;
     onFocusInput: (cb: () => void) => void;
     removeFocusInput: () => void;
-    onStatusChange: (cb: (s: string) => void) => void;
-    removeStatusChange: () => void;
   };
 
-  const getApi = () => (window as unknown as Record<string, CmdAPI>).electronAPI;
+  const getApi = () => (window as unknown as Record<string, StreamAPI>).electronAPI;
 
   useEffect(() => {
     const api = getApi();
     if (!api) return;
 
     api.onFocusInput(() => { inputRef.current?.focus(); });
-    api.onStatusChange((s) => { setStatus(s); });
 
-    api.onPromptResponse((msg) => {
-      if (msg.type === "start") {
-        setResponse("");
-        setRawOutput("");
-        setError("");
-        setLoading(true);
-      } else if (msg.type === "chunk") {
-        setResponse(prev => prev + (msg.data || ""));
-      } else if (msg.type === "raw") {
-        setRawOutput(prev => prev + (msg.data || ""));
-      } else if (msg.type === "error") {
-        setError(prev => prev + (msg.data || ""));
+    api.onStreamEvent((msg) => {
+      if (msg.type === "init") {
+        setSessionActive(true);
+      } else if (msg.type === "assistant" && msg.content) {
+        setStatus("working");
+        for (const block of msg.content) {
+          if (block.type === "text" && block.text) {
+            setTranscript(prev => prev + block.text);
+          }
+          if (block.type === "tool_use") {
+            setTranscript(prev => prev + `\n[${block.name}: ${JSON.stringify(block.input || {}).slice(0, 100)}]\n`);
+          }
+        }
+      } else if (msg.type === "result") {
+        if (msg.isError) {
+          setStatus("error");
+          setTranscript(prev => prev + `\nError: ${msg.result || "Unknown error"}\n`);
+        }
+        setSessionActive(true);
       } else if (msg.type === "done") {
-        setLoading(false);
+        setStatus("none");
         inputRef.current?.focus();
       }
     });
 
     return () => {
-      api.removePromptResponse();
+      api.removeStreamEvent();
       api.removeFocusInput();
-      api.removeStatusChange();
     };
   }, []);
 
   useEffect(() => {
-    if (responseRef.current) {
-      responseRef.current.scrollTop = responseRef.current.scrollHeight;
+    if (transcriptRef.current) {
+      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
-  }, [response, rawOutput, error]);
+  }, [transcript]);
 
   const resizeTextarea = useCallback(() => {
     const el = inputRef.current;
@@ -1652,98 +1651,44 @@ function CommandBar() {
 
   const send = () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || status === "working") return;
     const api = getApi();
     if (!api) return;
-
-    if (isPermission) {
-      api.sendToTerminal(text);
-      setInput("");
-      setStatus("streaming");
-      if (inputRef.current) inputRef.current.style.height = "auto";
-      return;
-    }
-
-    if (loading) return;
-    setResponse("");
-    setRawOutput("");
-    setError("");
-    setLastPrompt(text);
-    api.sendPrompt(text);
+    setTranscript(prev => prev + (prev ? "\n" : "") + "> " + text + "\n");
+    setStatus("working");
+    api.sendStreamPrompt(text);
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
-  };
-
-  const sendTerminal = (text: string) => {
-    const api = getApi();
-    if (!api) return;
-    api.sendToTerminal(text);
-    setStatus("streaming");
   };
 
   const cancel = () => {
     const api = getApi();
     if (!api) return;
-    api.cancelCommand();
-    setStatus("idle");
-    inputRef.current?.blur();
+    api.cancelStream();
   };
 
-  const isThinking = status === "thinking";
-  const isStreaming = status === "streaming";
-  const isPermission = status === "permission";
-  const displayContent = showRaw ? rawOutput : response;
-  const barClass = isPermission ? "cmd-permission" : isThinking ? "cmd-thinking" : "";
+  const endSession = () => {
+    const api = getApi();
+    if (!api) return;
+    api.endStreamSession();
+    setTranscript("");
+    setSessionActive(false);
+  };
+
+  const isWorking = status === "working";
 
   return (
-    <div className={`no-drag shrink-0 border-t border-white/[0.08] transition-all duration-300 ${barClass}`} style={{ background: "rgba(0, 0, 0, 0.40)", backdropFilter: "blur(24px) saturate(150%)" }}>
-      {(displayContent || error || loading) && (
-        <div ref={responseRef} className="px-3 pt-2 pb-1 max-h-[150px] overflow-y-auto">
-          {lastPrompt && (
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className="text-[7px] font-sans font-bold tracking-[0.15em] uppercase text-indigo-400/50">PROMPT</span>
-              <span className="text-[9px] font-mono text-txt-tertiary truncate">{lastPrompt}</span>
-            </div>
-          )}
-          {displayContent && (
-            showRaw
-              ? <pre className="text-[8px] font-mono text-cyan-300/50 leading-relaxed whitespace-pre-wrap break-all">{displayContent}</pre>
-              : <p className="text-[9px] font-mono text-indigo-200/70 leading-relaxed whitespace-pre-wrap">{displayContent}</p>
-          )}
-          {error && <p className="text-[9px] font-mono text-red-400/70 leading-relaxed whitespace-pre-wrap">{error}</p>}
-          {isThinking && !displayContent && !error && (
-            <div className="flex items-center gap-2 py-1">
-              <div className="w-2.5 h-2.5 rounded-full border border-cyan-400/50 border-t-cyan-400 animate-spin" />
-              <span className="text-[8px] font-mono text-cyan-300/50">Thinking...</span>
-            </div>
-          )}
-          {isStreaming && loading && (
-            <div className="flex items-center gap-1 mt-1">
-              <div className="w-1.5 h-1.5 rounded-full bg-indigo-400/60 animate-pulse" />
-            </div>
-          )}
-        </div>
-      )}
-      {isPermission && (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-t border-amber-400/10">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400/70 shrink-0">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
-          </svg>
-          <span className="text-[8px] font-sans font-bold tracking-[0.12em] uppercase text-amber-300/70">Permission Required</span>
-          <div className="flex-1" />
-          <button onClick={() => sendTerminal("y")}
-            className="px-2.5 py-1 rounded-md text-[8px] font-sans font-bold tracking-wider uppercase transition-all"
-            style={{ background: "rgba(74, 222, 128, 0.15)", border: "1px solid rgba(74, 222, 128, 0.20)", color: "rgba(134, 239, 172, 0.9)" }}>
-            Approve
-          </button>
-          <button onClick={() => sendTerminal("n")}
-            className="px-2.5 py-1 rounded-md text-[8px] font-sans font-bold tracking-wider uppercase transition-all"
-            style={{ background: "rgba(239, 68, 68, 0.15)", border: "1px solid rgba(239, 68, 68, 0.20)", color: "rgba(252, 165, 165, 0.9)" }}>
-            Deny
-          </button>
+    <div className={`no-drag shrink-0 border-t border-white/[0.08] transition-all duration-300 ${isWorking ? "cmd-thinking" : ""}`} style={{ background: "rgba(0, 0, 0, 0.40)", backdropFilter: "blur(24px) saturate(150%)" }}>
+      {transcript && (
+        <div ref={transcriptRef} className="px-3 pt-2 pb-1 max-h-[150px] overflow-y-auto">
+          <pre className="text-[9px] font-mono text-indigo-200/70 leading-relaxed whitespace-pre-wrap break-words">{transcript}</pre>
         </div>
       )}
       <div className="flex items-end gap-2 px-3 py-2">
+        <div className="flex items-center gap-1.5 shrink-0 self-center">
+          <div className={`w-2 h-2 rounded-full ${isWorking ? "bg-cyan-400 animate-pulse" : status === "error" ? "bg-red-400" : sessionActive ? "bg-green-400" : "bg-white/20"}`} />
+          <span className="text-[7px] font-mono text-txt-tertiary w-[40px]">{isWorking ? "Stream" : sessionActive ? "Ready" : "Idle"}</span>
+        </div>
         <div className="relative flex-1">
           <textarea
             ref={inputRef}
@@ -1752,45 +1697,40 @@ function CommandBar() {
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
-              if (e.key === "Escape") { if (loading) cancel(); else inputRef.current?.blur(); }
+              if (e.key === "Escape") { if (isWorking) cancel(); else inputRef.current?.blur(); }
             }}
-            placeholder={isPermission ? "Type y/n or use buttons above..." : isThinking ? "Thinking..." : "Send a command...   Ctrl+K"}
-            className={`w-full px-3 py-1.5 rounded-lg text-[10px] font-mono text-txt-secondary placeholder:text-txt-tertiary outline-none transition-all focus:ring-1 resize-none overflow-hidden ${isPermission ? "focus:ring-amber-500/30 border-amber-500/20" : "focus:ring-indigo-500/30"} ${isThinking ? "border-cyan-500/20" : ""}`}
-            style={{ background: "rgba(255, 255, 255, 0.04)", border: `1px solid ${isPermission ? "rgba(251, 191, 36, 0.15)" : isThinking ? "rgba(34, 211, 238, 0.15)" : "rgba(255, 255, 255, 0.06)"}` }}
+            placeholder={isWorking ? "Streaming..." : "Send a prompt...   Ctrl+K"}
+            className="w-full px-3 py-1.5 rounded-lg text-[10px] font-mono text-txt-secondary placeholder:text-txt-tertiary outline-none transition-all focus:ring-1 focus:ring-indigo-500/30 resize-none overflow-hidden"
+            style={{ background: "rgba(255, 255, 255, 0.04)", border: "1px solid rgba(255, 255, 255, 0.06)" }}
           />
-          {loading && !isPermission && (
+          {isWorking && (
             <div className="absolute right-2.5 bottom-2">
-              <div className={`w-3 h-3 rounded-full border animate-spin ${isThinking ? "border-cyan-400/50 border-t-cyan-400" : "border-indigo-400/50 border-t-indigo-400"}`} />
+              <div className="w-3 h-3 rounded-full border border-cyan-400/50 border-t-cyan-400 animate-spin" />
             </div>
           )}
         </div>
-        <button
-          onClick={() => setShowRaw(!showRaw)}
-          className={`px-2 py-1.5 rounded-lg text-[9px] font-mono transition-all ${showRaw ? "text-cyan-300/80" : "text-txt-tertiary/50 hover:text-txt-tertiary"}`}
-          style={{ background: showRaw ? "rgba(34, 211, 238, 0.08)" : "transparent", border: `1px solid ${showRaw ? "rgba(34, 211, 238, 0.15)" : "rgba(255, 255, 255, 0.04)"}` }}
-          title="Toggle raw output"
-        >
-          {"</>"}
-        </button>
-        {loading ? (
-          <button
-            onClick={cancel}
-            className="px-3 py-1.5 rounded-lg transition-all"
-            style={{ background: "rgba(239, 68, 68, 0.20)", border: "1px solid rgba(239, 68, 68, 0.15)", color: "rgba(252, 165, 165, 0.9)" }}
-          >
+        {isWorking ? (
+          <button onClick={cancel} className="px-3 py-1.5 rounded-lg transition-all"
+            style={{ background: "rgba(239, 68, 68, 0.20)", border: "1px solid rgba(239, 68, 68, 0.15)", color: "rgba(252, 165, 165, 0.9)" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <rect x="3" y="3" width="18" height="18" rx="2" />
             </svg>
           </button>
         ) : (
-          <button
-            onClick={send}
-            disabled={!input.trim()}
+          <button onClick={send} disabled={!input.trim()}
             className="px-3 py-1.5 rounded-lg transition-all disabled:opacity-30"
-            style={{ background: "rgba(99, 102, 241, 0.20)", border: "1px solid rgba(99, 102, 241, 0.15)", color: "rgba(165, 180, 252, 0.9)" }}
-          >
+            style={{ background: "rgba(99, 102, 241, 0.20)", border: "1px solid rgba(99, 102, 241, 0.15)", color: "rgba(165, 180, 252, 0.9)" }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
               <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        )}
+        {sessionActive && (
+          <button onClick={endSession} title="End session"
+            className="px-2 py-1.5 rounded-lg transition-all text-txt-tertiary/50 hover:text-red-400/80"
+            style={{ background: "transparent", border: "1px solid rgba(255, 255, 255, 0.04)" }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M18.36 6.64A9 9 0 1 1 5.64 5.64" /><line x1="12" y1="2" x2="12" y2="12" />
             </svg>
           </button>
         )}
