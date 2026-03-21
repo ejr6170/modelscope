@@ -6,7 +6,7 @@ ModelScope currently reads Claude Code's session data from JSONL log files after
 
 ## Solution
 
-Switch to Claude Code's `--output-format stream-json` as the primary data source. Sessions started from ModelScope spawn `claude --output-format stream-json --verbose` via `child_process.spawn`, receiving structured NDJSON in real-time. The JSONL file watcher remains as a fallback for externally started sessions.
+Switch to Claude Code's `--output-format stream-json` as the primary data source. Each prompt from ModelScope spawns `claude -p -c --output-format stream-json --verbose` via `child_process.spawn`, receiving structured NDJSON in real-time. The `-c` flag continues the most recent conversation, giving multi-turn continuity. The JSONL file watcher remains as a fallback for externally started sessions.
 
 ## Design
 
@@ -14,39 +14,47 @@ Switch to Claude Code's `--output-format stream-json` as the primary data source
 
 **Replace node-pty with `child_process.spawn`** in `electron/main.js`.
 
-The engine spawns:
+**Per-prompt process model:** Each user prompt spawns a new process:
+
 ```
-claude --output-format stream-json --verbose
+First prompt:  claude -p --output-format stream-json --verbose
+Follow-ups:    claude -p -c --output-format stream-json --verbose
 ```
 
-With `stdio: ["pipe", "pipe", "pipe"]`. No shell wrapper needed — `spawn` with `shell: true` resolves `claude` from PATH.
+The `-p` flag is required — `--output-format stream-json` only works in print mode. The `-c` flag on subsequent prompts resumes the most recent conversation in the working directory, giving multi-turn continuity without a persistent process.
 
-**Stdout processing:** Buffer incoming data by newline. Each complete line is parsed as JSON. Based on the `type` field, the engine emits typed IPC events to the renderer:
+The user's prompt text is piped via stdin (`proc.stdin.write(text); proc.stdin.end()`). The process produces NDJSON on stdout, then exits when done.
 
-| Stream `type` | IPC event | Payload |
-|---|---|---|
-| `system` (subtype `init`) | `stream-init` | `{ sessionId, model, tools, cwd }` |
-| `assistant` | `stream-assistant` | `{ content: [{type, text?, toolUse?}], tokens: {input, output, cacheRead, cacheCreation}, costUSD, model }` |
-| `result` | `stream-result` | `{ totalCost, durationMs, usage, isError, result }` |
-| `rate_limit_event` | `stream-rate-limit` | `{ status, resetsAt, isUsingOverage }` |
+**Stdout processing:** Buffer incoming data by newline. Each complete line is parsed as JSON. Based on the `type` field, the engine normalizes and emits typed IPC events to the renderer.
 
-The engine extracts and normalizes the fields from the raw stream-json format. The renderer receives clean, typed objects.
+**Field mapping from raw stream-json to normalized IPC payloads:**
 
-**Stdin for follow-up prompts:** When the user sends a message from the command bar, the engine writes the text + `\n` to the spawned process's stdin. Claude treats it as the next user turn. The conversation continues in the same process.
+| Stream `type` | Raw field path | IPC event | Normalized payload |
+|---|---|---|---|
+| `system` (subtype `init`) | `session_id`, `model`, `tools`, `cwd` | `stream-event` | `{ type: "init", sessionId: msg.session_id, model: msg.model, tools: msg.tools, cwd: msg.cwd }` |
+| `assistant` | `message.content`, `message.usage.*`, `message.model` | `stream-event` | `{ type: "assistant", content: msg.message.content, tokens: { input: msg.message.usage.input_tokens, output: msg.message.usage.output_tokens, cacheRead: msg.message.usage.cache_read_input_tokens \|\| 0, cacheCreation: msg.message.usage.cache_creation_input_tokens \|\| 0 }, model: msg.message.model }` |
+| `result` | `total_cost_usd`, `duration_ms`, `is_error`, `result`, `usage` | `stream-event` | `{ type: "result", totalCost: msg.total_cost_usd, durationMs: msg.duration_ms, isError: msg.is_error, result: msg.result, usage: msg.usage }` |
+| `rate_limit_event` | `rate_limit_info.status`, `rate_limit_info.resetsAt` | `stream-event` | `{ type: "rateLimit", status: msg.rate_limit_info.status, resetsAt: msg.rate_limit_info.resetsAt }` |
 
-**Session lifecycle:**
-- `start-stream-session` IPC → spawns the process, begins streaming
-- `send-stream-input` IPC → writes text to stdin
-- `end-stream-session` IPC → kills the process, cleans up
-- Process exit (natural or error) → sends `stream-result` with final state
+All events go through a single IPC channel `stream-event` with a `type` discriminator. The engine does the snake_case → camelCase conversion and field flattening so the renderer receives clean objects.
 
-**Error handling:** If the process exits with a non-zero code, emit a `stream-result` with `isError: true`. If stdout produces invalid JSON lines, skip them silently (stderr output from Claude sometimes intermixes).
+**Session state tracking:** The engine tracks `isFirstPrompt` (boolean). First prompt omits `-c`, all subsequent prompts include it. Calling `end-stream-session` resets this flag.
+
+**Process lifecycle per prompt:**
+- User sends prompt → engine spawns process, pipes prompt to stdin, closes stdin
+- Process streams NDJSON to stdout → engine parses and forwards via IPC
+- Process exits → engine sends final `stream-event { type: "done" }`
+- While running, a `cancel-stream` IPC kills the process
+
+**Hardware monitor PID tracking:** When the process spawns, call `hardwareMonitor.setRootPid(proc.pid)`. On process exit, call `hardwareMonitor.setRootPid(null)`. The `ChildProcess` object from `spawn` exposes `.pid`.
+
+**Error handling:** Non-zero exit code → emit `stream-event { type: "error", message }`. Invalid JSON lines on stdout → skip silently.
 
 ### 2. Data Flow — Primary vs Fallback
 
-**Stream-json (primary):** For sessions started from ModelScope's command bar:
+**Stream-json (primary):** For prompts sent from ModelScope's command bar:
 ```
-claude process → stdout NDJSON → main.js line parser → IPC → renderer → FeedCards + metrics
+claude -p -c process → stdout NDJSON → main.js line parser → IPC stream-event → renderer → FeedCards + metrics
 ```
 One hop. No socket.io server in the path.
 
@@ -56,79 +64,84 @@ One hop. No socket.io server in the path.
 ```
 Same as current. Stays untouched.
 
-Both sources produce the same `FeedCard` types and metrics updates. The renderer doesn't distinguish between them — cards from either source go into the same `cards` array.
+Both sources produce the same `FeedCard` types and metrics updates. The renderer accumulates from both.
 
 ### 3. Feed Integration
 
-**Converting stream-json to FeedCards:**
+**Converting stream-json `assistant` content blocks to FeedCards:**
 
-| Stream-json content | FeedCard `kind` |
-|---|---|
-| `content[].type === "text"` | `"reply"` |
-| `content[].type === "tool_use"` where tool is Write/Edit | `"code"` |
-| `content[].type === "tool_use"` where tool is Bash/Grep/Glob/Read/etc | `"tool"` |
-| `content[].type === "thinking"` | `"thought"` |
-| `result` with `is_error: true` | `"error"` |
+The `assistant` event contains `content[]` — an array of content blocks. Each block becomes one or more FeedCards:
 
-**Metrics from stream-json:** The `assistant` message contains `usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_input_tokens`. The `result` message contains `total_cost_usd` and `duration_ms`. These update the sidebar metrics state directly in the renderer — no need for the server to compute them.
+| `content[].type` | FeedCard `kind` | Notes |
+|---|---|---|
+| `"text"` | `"reply"` | Text response from Claude |
+| `"tool_use"` where `name` is `Write` or `Edit` | `"code"` | Extract `input.file_path`, `input.content`/`input.old_string`/`input.new_string` |
+| `"tool_use"` where `name` is `Bash`, `Grep`, `Glob`, `Read`, etc. | `"tool"` | Extract `name` and `input` for display |
+| `"thinking"` | `"thought"` | Only appears with extended thinking beta flag |
 
-**Rate limit display:** The `rate_limit_event` contains `resetsAt` and `status`. This feeds directly into the sidebar's usage display, giving more accurate rate limit info than the current cached `/usage` approach.
+The `result` event with `is_error: true` produces a `"error"` FeedCard.
+
+**Metrics accumulation:** Each `assistant` event's token counts are ADDED to the running totals (they are per-turn, not cumulative). The `result` event's `total_cost_usd` is the authoritative cost for the full prompt — add it to the session cost total.
+
+**Rate limit display:** The `rate_limit_event`'s `rate_limit_info.status` and `rate_limit_info.resetsAt` feed into the sidebar usage display.
 
 ### 4. Command Bar Changes
 
-The CommandBar component switches from the old `sendPrompt`/`onPromptResponse` IPC to the new stream IPC.
+The CommandBar switches from the old prompt/response IPC to stream events.
 
-**Session auto-start:** First prompt starts a stream session (calls `startStreamSession()`), waits for `stream-init`, then sends the prompt via `sendStreamInput(text)`.
+**Per-prompt flow:**
+1. User types prompt, hits Enter
+2. CommandBar calls `sendStreamPrompt(text)` via IPC
+3. Engine spawns `claude -p [-c] --output-format stream-json --verbose`, pipes text to stdin
+4. `stream-event` messages arrive — CommandBar appends text content to transcript, updates status pill
+5. Process exits — `stream-event { type: "done" }` signals completion
+6. Next prompt repeats from step 1 with `-c` flag
 
-**Streaming display:** As `stream-assistant` events arrive, the command bar's transcript area shows text content in real-time. Tool calls show as compact badges. The status pill reflects the session state based on which events are flowing.
+**Status pill states:**
+- `none` — no prompt running, gray
+- `working` — process alive and streaming, cyan
+- `done` — process exited, green flash then back to `none`
+- `error` — process failed, red
 
-**Permission handling:** If Claude requests a tool use that needs permission, the `assistant` message will contain the tool_use content block. The next `result` or error will indicate if it was denied. The command bar can detect this and show the Approve/Deny UI.
+**Permission handling in `-p` mode:** Print mode with `--output-format stream-json` skips the interactive permission dialog. Claude uses its default permission settings. If a tool is denied, the `result` event will contain `permission_denials` array. The command bar can display these but cannot interactively approve — this is a known limitation of `-p` mode. For interactive permission control, users should configure `--dangerously-skip-permissions` or set up `.claude/settings.json` allow lists. This is acceptable for the MVP.
 
-### 5. External Session Watching
-
-For sessions started outside ModelScope (in a terminal), the user can pipe stream-json to a file that ModelScope watches:
-
-```bash
-claude --output-format stream-json --verbose 2>&1 | tee ~/.claude/modelscope-stream.jsonl
-```
-
-Or ModelScope can detect external sessions via the existing JSONL watcher and display them with turn-level granularity (current behavior, no change).
-
-This is a future enhancement — for the MVP, external sessions use the existing JSONL fallback.
-
-### 6. File Changes
+### 5. File Changes
 
 **`electron/main.js` (~80 lines changed):**
-- Remove: `node-pty` import, all pty-related code
-- Add: `child_process.spawn` session engine with NDJSON line parser
-- New IPC handlers: `start-stream-session`, `send-stream-input`, `end-stream-session`
-- Forward parsed stream events as typed IPC: `stream-init`, `stream-assistant`, `stream-result`, `stream-rate-limit`
+- Remove: `node-pty` import (`const pty = require("node-pty")`), all pty-related code (ptyProcess, onData, onExit, permission regex, ANSI stripping)
+- Add: `spawn` from `child_process` (already imported as `fork`), stream session engine
+- New IPC handlers: `send-stream-prompt` (spawns process, pipes text), `cancel-stream` (kills process), `end-stream-session` (resets `isFirstPrompt`)
+- NDJSON line parser that normalizes fields and forwards via `stream-event` IPC
+- `hardwareMonitor.setRootPid(proc.pid)` on spawn, `setRootPid(null)` on exit
 
 **`electron/preload.cjs` (~10 lines changed):**
-- Remove: old command bar IPC methods (`sendPrompt`, `onPromptResponse`, `removePromptResponse`, `cancelCommand`, `onStatusChange`, `removeStatusChange`)
-- Add: `startStreamSession()`, `sendStreamInput(text)`, `endStreamSession()`, `onStreamEvent(callback)`, `removeStreamEvent()`
+- Remove: `sendPrompt`, `sendToTerminal`, `cancelCommand`, `onPromptResponse`, `removePromptResponse`, `onStatusChange`, `removeStatusChange`
+- Add: `sendStreamPrompt(text)`, `cancelStream()`, `endStreamSession()`, `onStreamEvent(callback)`, `removeStreamEvent()`
 
 **`app/components/Dashboard.tsx` (~100 lines changed):**
-- CommandBar: rewrite to use stream IPC
-- Add: `onStreamEvent` listener that converts stream messages to FeedCards and metrics
-- Remove: old `onPromptResponse`/`onStatusChange` handlers
+- CommandBar: rewrite send logic to call `sendStreamPrompt`, listen to `onStreamEvent`
+- Add: stream event handler that converts `assistant` content to FeedCards and accumulates metrics
+- Remove: old prompt/response/status handlers and types
+- Keep: transcript area, status pill, session controls (adapted to new states)
 
 **`package.json`:**
 - Remove: `node-pty` from dependencies
 
 **No changes to:** `server.js`, `src/parser.js`, `src/usage-cache.js`, `src/hardware-monitor.js`, `app/globals.css`
 
-### 7. What This Does NOT Change
+### 6. What This Does NOT Change
 
 - JSONL file watcher in server.js — stays as fallback
-- Socket.io server — still runs for project list, external sessions
-- Hardware metrics — unchanged
-- AGENTS tab — unchanged (subagent tracking still via socket.io)
+- Socket.io server — still runs for project list, external sessions, subagent tracking
+- Hardware metrics — unchanged (PID tracking migrated from pty to spawn)
+- AGENTS tab — unchanged
 - Auto-updater — unchanged
 
-### 8. Future Extension (Out of Scope)
+### 7. Future Extension (Out of Scope)
 
-- Watching external stream-json pipes (tee'd files)
-- `--input-format stream-json` for structured prompt sending
+- `--input-format stream-json` for structured bidirectional streaming
+- Interactive permission handling (requires non `-p` mode)
+- Watching external stream-json pipes
 - Multiple simultaneous stream-json sessions
-- Stream-json data feeding into the AGENTS tab subagent tracking
+- Stream-json data feeding into AGENTS tab subagent tracking
+- Extended thinking beta flag (`--betas interleaved-thinking`)
