@@ -2,12 +2,12 @@ import { app, BrowserWindow, screen, ipcMain, globalShortcut } from "electron";
 import { createRequire } from "module";
 import path from "path";
 import { fileURLToPath } from "url";
-import { fork } from "child_process";
+import { fork, spawn } from "child_process";
 import HardwareMonitor from "../src/hardware-monitor.js";
 
 const require = createRequire(import.meta.url);
 const { autoUpdater } = require("electron-updater");
-const pty = require("node-pty");
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.argv.includes("--dev") || !app.isPackaged;
@@ -112,77 +112,125 @@ function createWindow() {
   ipcMain.on("window-always-on-top", (_e, value) => mainWindow.setAlwaysOnTop(value));
   ipcMain.on("install-update", () => autoUpdater.quitAndInstall());
 
-  let ptyProcess = null;
+  let activeProc = null;
+  let isFirstPrompt = true;
 
-  const PERMISSION_RE = /\b(permission|approve|allow|deny|y\/n|\[Y\/n\]|\[y\/N\]|Do you want|Would you like|hasn't been granted|haven't granted)\b/i;
-  const ANSI_RE = /\x1B(?:\[[0-9;]*[A-Za-z]|\].*?(?:\x07|\x1B\\)|\([A-Z])/g;
+  function parseStreamLine(line) {
+    try {
+      const msg = JSON.parse(line);
+      if (!msg || !msg.type) return null;
 
-  function cleanOutput(raw) {
-    return raw.replace(ANSI_RE, "").replace(/\r/g, "");
+      if (msg.type === "system" && msg.subtype === "init") {
+        return { type: "init", sessionId: msg.session_id, model: msg.model, tools: msg.tools, cwd: msg.cwd };
+      }
+
+      if (msg.type === "assistant" && msg.message) {
+        const u = msg.message.usage || {};
+        return {
+          type: "assistant",
+          content: msg.message.content || [],
+          tokens: {
+            input: u.input_tokens || 0,
+            output: u.output_tokens || 0,
+            cacheRead: u.cache_read_input_tokens || 0,
+            cacheCreation: u.cache_creation_input_tokens || 0,
+          },
+          model: msg.message.model || "",
+        };
+      }
+
+      if (msg.type === "result") {
+        return {
+          type: "result",
+          totalCost: msg.total_cost_usd || 0,
+          durationMs: msg.duration_ms || 0,
+          isError: msg.is_error || false,
+          result: msg.result || "",
+          usage: msg.usage || {},
+        };
+      }
+
+      if (msg.type === "rate_limit_event" && msg.rate_limit_info) {
+        return {
+          type: "rateLimit",
+          status: msg.rate_limit_info.status,
+          resetsAt: msg.rate_limit_info.resetsAt,
+        };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
   }
 
-  ipcMain.on("send-prompt", (_e, text) => {
+  ipcMain.on("send-stream-prompt", (_e, text) => {
     if (!mainWindow) return;
-    if (ptyProcess) {
-      ptyProcess.kill();
-      ptyProcess = null;
+    if (activeProc) {
+      activeProc.kill();
+      activeProc = null;
     }
 
-    mainWindow.webContents.send("prompt-response", { type: "start" });
-    mainWindow.webContents.send("status-change", "thinking");
+    const args = ["-p", "--output-format", "stream-json", "--verbose"];
+    if (!isFirstPrompt) args.push("-c");
 
-    const shell = process.platform === "win32" ? "cmd.exe" : "/bin/bash";
-    const shellArgs = process.platform === "win32"
-      ? ["/c", `claude -p --output-format text --verbose`]
-      : ["-c", `claude -p --output-format text --verbose`];
-
-    ptyProcess = pty.spawn(shell, shellArgs, {
-      name: "xterm-256color",
-      cols: 120,
-      rows: 30,
+    const proc = spawn("claude", args, {
+      shell: true,
+      env: { ...process.env },
+      stdio: ["pipe", "pipe", "pipe"],
       cwd: process.cwd(),
-      env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
-      encoding: "utf8",
     });
 
-    ptyProcess.write(text + "\r");
+    activeProc = proc;
+    if (hardwareMonitor) hardwareMonitor.setRootPid(proc.pid);
 
-    if (hardwareMonitor) hardwareMonitor.setRootPid(ptyProcess.pid);
+    proc.stdin.write(text);
+    proc.stdin.end();
 
-    let firstChunk = true;
+    let buffer = "";
 
-    ptyProcess.onData((raw) => {
-      const clean = cleanOutput(raw);
-      mainWindow?.webContents.send("prompt-response", { type: "raw", data: raw });
-      if (clean.trim()) {
-        if (firstChunk) { mainWindow?.webContents.send("status-change", "streaming"); firstChunk = false; }
-        mainWindow?.webContents.send("prompt-response", { type: "chunk", data: clean });
-      }
-      if (PERMISSION_RE.test(clean)) {
-        mainWindow?.webContents.send("status-change", "permission");
+    proc.stdout.on("data", (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const parsed = parseStreamLine(line);
+        if (parsed) {
+          mainWindow?.webContents.send("stream-event", parsed);
+        }
       }
     });
 
-    ptyProcess.onExit(() => {
-      mainWindow?.webContents.send("prompt-response", { type: "done" });
-      mainWindow?.webContents.send("status-change", "idle");
-      ptyProcess = null;
+    proc.stderr.on("data", () => {});
+
+    proc.on("close", (code) => {
+      if (buffer.trim()) {
+        const parsed = parseStreamLine(buffer);
+        if (parsed) mainWindow?.webContents.send("stream-event", parsed);
+      }
       if (hardwareMonitor) hardwareMonitor.setRootPid(null);
+      mainWindow?.webContents.send("stream-event", { type: "done", exitCode: code });
+      activeProc = null;
+      isFirstPrompt = false;
     });
   });
 
-  ipcMain.on("send-to-terminal", (_e, input) => {
-    if (!ptyProcess) return;
-    ptyProcess.write(input + "\r");
+  ipcMain.on("cancel-stream", () => {
+    if (activeProc) {
+      activeProc.kill();
+      activeProc = null;
+      if (hardwareMonitor) hardwareMonitor.setRootPid(null);
+      mainWindow?.webContents.send("stream-event", { type: "done", exitCode: -1 });
+    }
   });
 
-  ipcMain.on("cancel-command", () => {
-    if (ptyProcess) {
-      ptyProcess.kill();
-      ptyProcess = null;
+  ipcMain.on("end-stream-session", () => {
+    isFirstPrompt = true;
+    if (activeProc) {
+      activeProc.kill();
+      activeProc = null;
       if (hardwareMonitor) hardwareMonitor.setRootPid(null);
-      mainWindow?.webContents.send("prompt-response", { type: "done" });
-      mainWindow?.webContents.send("status-change", "idle");
     }
   });
 
