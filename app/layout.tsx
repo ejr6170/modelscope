@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "ModelScope v1.0",
-  description: "Claude Code Session Observatory",
+  description: "Real-time session observatory",
 };
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className="noise-overlay">{children}</body>
+      <body className="noise-overlay scope-entrance">{children}</body>
     </html>
   );
 }
