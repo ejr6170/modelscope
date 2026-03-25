@@ -27,7 +27,9 @@ Reuse `eventToCards()` + `CardRouter` to render the same rich cards as the main 
 **Requires:** The `AgentEvent` interface must store full `SessionEvent`-shaped data so `eventToCards()` can consume it. Currently it stores a minimal `{ role, text, toolUses: { tool, input }[] }` shape.
 
 **Change `agentEvents` storage** (Dashboard.tsx, `subagent_event` handler ~line 2098):
-- Store the raw `SessionEvent` instead of extracting a subset
+- Store the raw `SessionEvent` (plus the `toolUseId`/`agentId` fields added by the server) instead of extracting a subset
+- Update state type from `Record<string, AgentEvent[]>` to `Record<string, SessionEvent[]>`
+- Remove the `AgentEvent` interface (lines 1966-1971) — no longer needed
 - `eventToCards()` already handles SessionEvent — no adapter needed
 
 **Render** (AgentsView, ~lines 1106-1123):
@@ -38,7 +40,7 @@ Reuse `eventToCards()` + `CardRouter` to render the same rich cards as the main 
 
 A file-centric code review view for reviewing all code an agent touched:
 
-- **File list header:** "N files changed, M edits"
+- **File list header:** "N files changed, M changes" (counts all `kind === "code"` cards — both Edit and Write)
 - **File entries:** Grouped by file path, sorted by most-recently-edited
   - File name + edit count badge
   - Click to expand/collapse
@@ -74,7 +76,7 @@ A file-centric code review view for reviewing all code an agent touched:
 setTranscript(prev => prev + `\n[${block.name}: ${JSON.stringify(block.input || {}).slice(0, 100)}]\n`);
 ```
 
-**New:** A `formatToolSummary()` helper that produces human-readable one-liners:
+**New:** A `formatTranscriptTool()` helper (distinct from the existing `formatToolSummary()` at line 133 which serves the feed) that produces human-readable one-liners. This function receives raw `block.input` from the stream-json API (keys: `file_path`, `old_string`, `new_string`, `command`, etc.) — not the parsed `SessionEvent` tool input (which uses `file`, `oldString`, `newString`):
 
 | Tool | Format |
 |------|--------|
@@ -102,22 +104,29 @@ AgentsView
             +-- DiffLines / CodeLines (reused)
 
 CommandBar
-  +-- formatToolSummary() helper (new)
+  +-- formatTranscriptTool() helper (new, receives raw stream-json block.input)
 ```
 
 **No new card components.** All rendering reuses existing CodeCard, DiffLines, CodeLines, CardRouter.
 
 **Modified interfaces:**
-- `AgentEvent` → replaced with storing raw `SessionEvent` in `agentEvents` state
+- `AgentEvent` interface removed → `agentEvents` state becomes `Record<string, SessionEvent[]>`
 
 **Modified server code:**
 - `checkSubagentLogs()` → enrich events with lineInfo before emitting
+
+**Implementation ordering:**
+1. Section 2 (subagent lineInfo) — must be done first since the Changes sub-tab depends on lineInfo being present
+2. Section 1 (Agents tab) — agentEvents storage change, then Activity tab, then Changes tab
+3. Section 3 (CommandBar) — independent, can be done in parallel
+
+**Sub-tab state:** Local `useState<"activity" | "changes">` inside AgentsView. Follows existing tab pattern from StatusBar.
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `app/components/Dashboard.tsx` | AgentsView redesign, AgentChangesView component, CommandBar formatToolSummary, agentEvents storage |
+| `app/components/Dashboard.tsx` | AgentsView redesign, AgentChangesView component, CommandBar formatTranscriptTool, agentEvents storage, remove AgentEvent interface |
 | `server.js` | Subagent event enrichment in checkSubagentLogs |
 
 ## Out of Scope
