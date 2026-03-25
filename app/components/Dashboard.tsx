@@ -198,8 +198,8 @@ function highlightSyntax(code: string, hotspots = false): string {
   return tokenEntries.map(tokenEntry => tokenEntry.c ? `<span class="${tokenEntry.c}">${tokenEntry.text}</span>` : tokenEntry.text).join("");
 }
 
-const cardMotion = { initial: { opacity: 0, y: 14, scale: 0.97, filter: "blur(4px)" }, animate: { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }, exit: { opacity: 0, y: -8, scale: 0.98, filter: "blur(2px)" } };
-const cardTr = { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const };
+const cardMotion = { initial: { opacity: 0, y: 14, scale: 0.97 }, animate: { opacity: 1, y: 0, scale: 1 }, exit: { opacity: 0, y: -8, scale: 0.98 } };
+const cardTr = { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const };
 
 function CostBadge({ tokens, cost, inputTokens, outputTokens }: { tokens?: number; cost?: number; inputTokens?: number; outputTokens?: number }) {
   if (!tokens && !cost) return null;
@@ -2140,7 +2140,7 @@ export default function Dashboard() {
   const focusedFiles = useMemo(() => Object.entries(fileTargets).filter(([, v]) => v === "focus").map(([k]) => k), [fileTargets]);
 
   const onScroll = useCallback(() => { if (!feedRef.current) return; autoScroll.current = feedRef.current.scrollHeight - feedRef.current.scrollTop - feedRef.current.clientHeight < 80; }, []);
-  const scrollBottom = useCallback(() => { if (autoScroll.current && feedRef.current) feedRef.current.scrollTo({ top: feedRef.current.scrollHeight, behavior: "smooth" }); }, []);
+  const scrollBottom = useCallback(() => { if (autoScroll.current && feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight; }, []);
 
   const dismissError = useCallback((id: string) => {
     setPinnedErrors(prev => prev.filter(e => e.id !== id));
@@ -2172,7 +2172,7 @@ export default function Dashboard() {
   }, []);
 
 
-  useEffect(() => { const iv = setInterval(() => setMetrics(p => ({ ...p, elapsed: Date.now() - p.startTime })), 1000); return () => clearInterval(iv); }, []);
+  useEffect(() => { const iv = setInterval(() => setMetrics(p => ({ ...p, elapsed: Date.now() - p.startTime })), 5000); return () => clearInterval(iv); }, []);
 
   useEffect(() => {
     const s = io("http://localhost:3778", { autoConnect: true, transports: ["websocket", "polling"], reconnection: true, reconnectionDelay: 1000 });
@@ -2261,15 +2261,15 @@ export default function Dashboard() {
          {...(settings.simpleHotspots ? { "data-simple-hotspots": true } : {})}
          style={{
            background: `rgba(13, 14, 18, ${settings.glassOpacity})`,
-           backdropFilter: settings.blurIntensity === "none" ? "none" : `blur(${settings.blurIntensity === "high" ? 60 : 25}px) saturate(160%)`,
-           WebkitBackdropFilter: settings.blurIntensity === "none" ? "none" : `blur(${settings.blurIntensity === "high" ? 60 : 25}px) saturate(160%)`,
-           boxShadow: "var(--glass-glow), 0 25px 50px -12px rgba(0,0,0,0.5)",
+           backdropFilter: settings.blurIntensity === "none" ? "none" : `blur(${settings.blurIntensity === "high" ? 30 : 12}px)`,
+           WebkitBackdropFilter: settings.blurIntensity === "none" ? "none" : `blur(${settings.blurIntensity === "high" ? 30 : 12}px)`,
+           boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
          }}>
       <StatusBar connected={connected} onOpenSettings={() => setSettingsOpen(true)} activeView={activeView} onViewChange={setActiveView} updateStatus={updateStatus} />
 
       <div className="flex-1 flex min-h-0 h-full">
         <div className="w-[180px] shrink-0 h-full border-r border-white/[0.10] p-0 m-0 relative z-10"
-             style={settings.sidebarShadows ? { boxShadow: "20px 0 35px rgba(0,0,0,0.5), 8px 0 15px rgba(0,0,0,0.3)" } : undefined}>
+             style={settings.sidebarShadows ? { boxShadow: "8px 0 16px rgba(0,0,0,0.3)" } : undefined}>
           <SessionPanel projects={projects} activeProjectId={activeProjectId} onSelect={switchProject} />
         </div>
 
@@ -2291,9 +2291,9 @@ export default function Dashboard() {
                     </div>
                   ) : (
                     <div className="p-3 space-y-2.5">
-                      <AnimatePresence initial={false} mode="popLayout">
+                      <AnimatePresence initial={false}>
                         {cards.map((card, i) => (
-                          <motion.div key={card.id} id={`card-${card.id}`} layout variants={cardMotion} initial="initial" animate="animate" exit="exit"
+                          <motion.div key={card.id} id={`card-${card.id}`} variants={cardMotion} initial="initial" animate="animate"
                             transition={{ ...cardTr, delay: i >= cards.length - 4 ? (cards.length - 1 - i) * 0.04 : 0 }}
                             className={highlightedCardId === card.id ? "card-highlight-pulse rounded-xl" : ""}>
                             <CardRouter card={card} />
@@ -2325,7 +2325,7 @@ export default function Dashboard() {
         </div>
 
         <div className="w-[180px] shrink-0 h-full border-l border-white/[0.10] p-0 m-0 relative z-10"
-             style={settings.sidebarShadows ? { boxShadow: "-20px 0 35px rgba(0,0,0,0.5), -8px 0 15px rgba(0,0,0,0.3)" } : undefined}>
+             style={settings.sidebarShadows ? { boxShadow: "-8px 0 16px rgba(0,0,0,0.3)" } : undefined}>
           <Sidebar metrics={metrics} model={model} session={session} onReset={() => socketRef.current?.emit("reset_stats")} fileTargets={fileTargets} onCycleTarget={cycleFileTarget} snipedCount={snipedFiles.length} hardwareMetrics={hardwareMetrics} />
         </div>
       </div>
