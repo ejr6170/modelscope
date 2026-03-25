@@ -512,6 +512,21 @@ function checkSubagentLogs(projectId) {
         event.isSubagentEvent = true;
         event.agentId = sa.agentId;
         event.toolUseId = agentIdMap.get(sa.agentId) || sa.agentId;
+
+        if (event.role === "assistant" && event.toolUses) {
+          for (const tu of event.toolUses) {
+            if (tu.tool === "Edit" && tu.input?.file) {
+              const info = resolveEditLines(projectId, tu.id, tu.input.file, tu.input.oldString, tu.input.newString, tu.input.replaceAll);
+              if (info) tu.lineInfo = info;
+            }
+            if (tu.tool === "Write" && tu.input?.content) {
+              const lineCount = tu.input.content.split("\n").length;
+              tu.lineInfo = { startLine: 1, endLine: lineCount, hunks: [{ startLine: 1, lineCount }] };
+              try { tu.isNewFile = !fs.existsSync(tu.input.file); } catch { tu.isNewFile = false; }
+            }
+          }
+        }
+
         emitToProjectViewers(projectId, "subagent_event", event);
       }
     }
