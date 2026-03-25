@@ -134,6 +134,27 @@ function formatToolSummary(toolName: string, input: ToolInput): string {
   switch (toolName) { case "Glob": return input.pattern || ""; case "Grep": return `/${input.pattern || ""}/`; case "Agent": return input.description || ""; case "ToolSearch": return String(input.query || ""); default: return Object.values(input).filter(v => typeof v === "string").join(" ").slice(0, 80); }
 }
 
+function formatTranscriptTool(name: string, input: Record<string, unknown>): string {
+  const sp = (f: unknown) => shortPath(String(f || ""));
+  switch (name) {
+    case "Edit": return `[Edit: ${sp(input.file_path)}]`;
+    case "Write": {
+      const lines = typeof input.content === "string" ? input.content.split("\n").length : 0;
+      return `[Write: ${sp(input.file_path)} (${lines} lines)]`;
+    }
+    case "Bash": return `[Terminal: ${String(input.command || input.description || "").slice(0, 80)}]`;
+    case "Read": return `[Read: ${sp(input.file_path)}]`;
+    case "Glob": return `[Search: ${String(input.pattern || "")}]`;
+    case "Grep": {
+      const p = String(input.pattern || "");
+      const path = input.path ? ` in ${sp(input.path)}` : "";
+      return `[Search: "${p}"${path}]`;
+    }
+    case "Agent": return `[Agent: "${String(input.description || "").slice(0, 60)}"]`;
+    default: return `[${name}]`;
+  }
+}
+
 function highlightSyntax(code: string, hotspots = false): string {
   const escaped = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const tokenEntries: { text: string; c?: string }[] = []; let remaining = escaped;
@@ -1595,7 +1616,7 @@ function CommandBar() {
             setTranscript(prev => prev + block.text);
           }
           if (block.type === "tool_use") {
-            setTranscript(prev => prev + `\n[${block.name}: ${JSON.stringify(block.input || {}).slice(0, 100)}]\n`);
+            setTranscript(prev => prev + `\n${formatTranscriptTool(block.name || "Tool", (block.input || {}) as Record<string, unknown>)}\n`);
           }
         }
       } else if (msg.type === "result") {
