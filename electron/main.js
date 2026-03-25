@@ -77,15 +77,19 @@ function createWindow() {
   });
 
   mainWindow.once("ready-to-show", () => {
+    mainWindow.setOpacity(0);
     mainWindow.show();
-    mainWindow.focus();
+    setTimeout(() => {
+      mainWindow.setOpacity(1);
+      mainWindow.focus();
+    }, 100);
   });
 
   hardwareMonitor = new HardwareMonitor();
   hardwareMonitor.onData((data) => {
     mainWindow?.webContents.send("hardware-metrics", data);
   });
-  hardwareMonitor.start(2500);
+  hardwareMonitor.start(5000);
 
   globalShortcut.register("CommandOrControl+K", () => {
     if (!mainWindow) return;

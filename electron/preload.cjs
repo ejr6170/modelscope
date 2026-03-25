@@ -1,7 +1,9 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
+let lastFocus = 0;
 window.addEventListener("mousedown", () => {
-  ipcRenderer.send("window-focus");
+  const now = Date.now();
+  if (now - lastFocus > 200) { lastFocus = now; ipcRenderer.send("window-focus"); }
 });
 
 contextBridge.exposeInMainWorld("electronAPI", {
