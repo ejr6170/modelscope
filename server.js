@@ -746,7 +746,7 @@ async function startWatching() {
     console.log(`[modelscope] Watching all projects with chokidar (depth: 3)`);
   } catch {
     console.log(`[modelscope] Polling all projects every 500ms`);
-    setInterval(checkAllProjects, 500);
+    setInterval(checkAllProjects, 2000);
   }
 }
 
