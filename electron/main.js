@@ -77,12 +77,8 @@ function createWindow() {
   });
 
   mainWindow.once("ready-to-show", () => {
-    mainWindow.setOpacity(0);
     mainWindow.show();
-    setTimeout(() => {
-      mainWindow.setOpacity(1);
-      mainWindow.focus();
-    }, 100);
+    mainWindow.focus();
   });
 
   hardwareMonitor = new HardwareMonitor();
@@ -239,9 +235,15 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL("http://localhost:3777");
-    mainWindow.webContents.on("did-fail-load", (_e, code, desc) => {
-      setTimeout(() => mainWindow.loadURL("http://localhost:3777"), 2000);
+    const tryLoad = () => {
+      if (!mainWindow) return;
+      mainWindow.loadURL("http://localhost:3777").catch(() => {
+        setTimeout(tryLoad, 1500);
+      });
+    };
+    tryLoad();
+    mainWindow.webContents.on("did-fail-load", () => {
+      setTimeout(tryLoad, 1500);
     });
   } else {
     const appPath = app.getAppPath();

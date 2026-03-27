@@ -1093,6 +1093,9 @@ function AgentsView({ activeAgents, completedAgents, agentEvents, session, metri
 
   useEffect(() => { setDetailTab("activity"); }, [selectedId]);
 
+  const selectedEvents = agentEvents[selectedId || ""] || [];
+  const selectedCards = useMemo(() => selectedEvents.flatMap(ev => eventToCards(ev)), [selectedEvents]);
+
   const allAgents = useMemo(() => {
     const agents: (AgentNode & { status: "active" | "done" | "failed" })[] = [];
     for (const a of activeAgents) {
@@ -1271,9 +1274,9 @@ function AgentsView({ activeAgents, completedAgents, agentEvents, session, metri
 
               {detailTab === "activity" && (
                 <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
-                  {(agentEvents[selected.id] || []).length === 0 && <p className="text-[8px] font-mono text-txt-tertiary">Waiting for events...</p>}
+                  {selectedCards.length === 0 && <p className="text-[8px] font-mono text-txt-tertiary">Waiting for events...</p>}
                   <AnimatePresence initial={false}>
-                    {(agentEvents[selected.id] || []).flatMap(ev => eventToCards(ev)).map(card => (
+                    {selectedCards.map(card => (
                       <motion.div key={card.id} variants={cardMotion} initial="initial" animate="animate" exit="exit" transition={cardTr}>
                         <CardRouter card={card} />
                       </motion.div>
@@ -1309,6 +1312,26 @@ function FlowView({ metrics }: { metrics: Metrics }) {
   const costPerHour = elapsed > 0 ? (metrics.cost / (elapsed / 3600000)) : 0;
   const totalIn = metrics.tokens.input + metrics.tokens.cacheRead;
   const cacheHitPct = totalIn > 0 ? Math.round((metrics.tokens.cacheRead / totalIn) * 100) : 0;
+
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const stickyRight = useRef(true);
+
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      stickyRight.current = el.scrollLeft + el.clientWidth >= el.scrollWidth - 4;
+    };
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const el = timelineRef.current;
+    if (el && stickyRight.current) {
+      el.scrollLeft = el.scrollWidth;
+    }
+  }, [metrics.costHistory]);
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4">
@@ -1372,7 +1395,7 @@ function FlowView({ metrics }: { metrics: Metrics }) {
         return (
           <div className="rounded-xl border border-white/[0.06] p-3" style={{ background: "var(--glass-card)" }}>
             <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary">Cost Per Turn</span>
-            <div className="mt-2 overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
+            <div className="mt-2 overflow-x-auto" ref={timelineRef}>
               <svg width={svgW} height={chartH} className="block">
                 {history.map((h, i) => {
                   const barH = Math.max((h.cost / maxCost) * (chartH - 20), 2);
@@ -1959,7 +1982,7 @@ function SettingSlider({ value, min, max, step, label, onChange }: { value: numb
   );
 }
 
-function CommandBar() {
+function CommandBar({ onRateLimit }: { onRateLimit?: (data: { status: string; resetsAt: string }) => void }) {
   const [input, setInput] = useState("");
   const [transcript, setTranscript] = useState("");
   const [status, setStatus] = useState<"none" | "working" | "error">("none");
@@ -1971,7 +1994,7 @@ function CommandBar() {
     sendStreamPrompt: (t: string) => void;
     cancelStream: () => void;
     endStreamSession: () => void;
-    onStreamEvent: (cb: (d: { type: string; content?: { type: string; text?: string; name?: string; input?: Record<string, unknown> }[]; tokens?: { input: number; output: number; cacheRead: number; cacheCreation: number }; model?: string; totalCost?: number; durationMs?: number; isError?: boolean; result?: string; exitCode?: number }) => void) => void;
+    onStreamEvent: (cb: (d: { type: string; content?: { type: string; text?: string; name?: string; input?: Record<string, unknown> }[]; tokens?: { input: number; output: number; cacheRead: number; cacheCreation: number }; model?: string; totalCost?: number; durationMs?: number; isError?: boolean; result?: string; exitCode?: number; status?: string; resetsAt?: string }) => void) => void;
     removeStreamEvent: () => void;
     onFocusInput: (cb: () => void) => void;
     removeFocusInput: () => void;
@@ -2007,6 +2030,8 @@ function CommandBar() {
       } else if (msg.type === "done") {
         setStatus("none");
         inputRef.current?.focus();
+      } else if (msg.type === "rateLimit") {
+        onRateLimit?.({ status: msg.status || "unknown", resetsAt: msg.resetsAt || "" });
       }
     });
 
@@ -2350,7 +2375,9 @@ function StatusBar({ connected, onOpenSettings, activeView, onViewChange, update
 function formatDuration(ms: number): string { const s = Math.floor(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60); if (h > 0) return `${h}h${String(m % 60).padStart(2, "0")}m`; if (m > 0) return `${m}m${String(s % 60).padStart(2, "0")}s`; return `${s}s`; }
 
 const MAX_CARDS = 60;
-const defaultMetrics: Metrics = { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, turns: 0, toolCalls: 0, elapsed: 0, velocity: 0, startTime: Date.now(), hourlyTurns: 0, topFiles: [], errorCount: 0, activeSubagents: [], plan: undefined, modelBreakdown: [], usage: undefined };
+function createDefaultMetrics(): Metrics {
+  return { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, turns: 0, toolCalls: 0, elapsed: 0, velocity: 0, startTime: Date.now(), hourlyTurns: 0, topFiles: [], errorCount: 0, activeSubagents: [], plan: undefined, modelBreakdown: [], usage: undefined };
+}
 
 interface AgentNode {
   id: string;
@@ -2374,7 +2401,7 @@ export default function Dashboard() {
   const [connected, setConnected] = useState(false);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [cards, setCards] = useState<FeedCard[]>([]);
-  const [metrics, setMetrics] = useState<Metrics>(defaultMetrics);
+  const [metrics, setMetrics] = useState<Metrics>(createDefaultMetrics);
   const [model, setModel] = useState("");
   const [pinnedErrors, setPinnedErrors] = useState<PinnedError[]>([]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -2404,7 +2431,6 @@ export default function Dashboard() {
   }, []);
 
   const snipedFiles = useMemo(() => Object.entries(fileTargets).filter(([, v]) => v === "snipe").map(([k]) => k), [fileTargets]);
-  const focusedFiles = useMemo(() => Object.entries(fileTargets).filter(([, v]) => v === "focus").map(([k]) => k), [fileTargets]);
 
   const onScroll = useCallback(() => { if (!feedRef.current) return; autoScroll.current = feedRef.current.scrollHeight - feedRef.current.scrollTop - feedRef.current.clientHeight < 80; }, []);
   const scrollBottom = useCallback(() => { if (autoScroll.current && feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight; }, []);
@@ -2423,9 +2449,11 @@ export default function Dashboard() {
     setActiveProjectId(projectId);
     setCards([]);
     setModel("");
-    setMetrics(defaultMetrics);
+    setMetrics(createDefaultMetrics());
     setPinnedErrors([]);
     setSession(null);
+    setCompletedAgents([]);
+    setAgentEvents({});
     socketRef.current?.emit("switch_project", projectId);
   }, []);
 
@@ -2508,7 +2536,9 @@ export default function Dashboard() {
 
     s.on("pinned_errors", (errs: PinnedError[]) => setPinnedErrors(errs));
     s.on("error_pinned", (err: PinnedError) => setPinnedErrors(p => [...p.slice(-9), err]));
-    s.on("usage_updated", () => {});
+    s.on("usage_updated", (data: Metrics["usage"]) => {
+      setMetrics(prev => ({ ...prev, usage: data }));
+    });
 
     const hwApi = (window as unknown as Record<string, Record<string, (...args: unknown[]) => void>>).electronAPI;
     hwApi?.onHardwareMetrics?.((data: unknown) => {
@@ -2602,7 +2632,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <CommandBar />
+      <CommandBar onRateLimit={(data) => socketRef.current?.emit("rate_limit", data)} />
 
       <AnimatePresence>
         {settingsOpen && <SettingsModal settings={settings} onUpdate={updateSettings} onReset={resetSettings} onClose={() => setSettingsOpen(false)} />}

@@ -747,6 +747,15 @@ io.on("connection", (socket) => {
   });
 });
 
+let projectListTimer = null;
+function debouncedBroadcastProjectList() {
+  if (projectListTimer) clearTimeout(projectListTimer);
+  projectListTimer = setTimeout(() => {
+    io.emit("projects_list", scanAllProjects());
+    projectListTimer = null;
+  }, 500);
+}
+
 async function startWatching() {
   const projects = scanAllProjects();
   if (projects.length > 0) {
@@ -768,7 +777,7 @@ async function startWatching() {
       if (projectId) {
         checkProjectSession(projectId);
         globalActiveProjectId = projectId;
-        io.emit("projects_list", scanAllProjects());
+        debouncedBroadcastProjectList();
       }
     });
 
@@ -779,7 +788,7 @@ async function startWatching() {
       if (projectId) {
         checkProjectSession(projectId);
         globalActiveProjectId = projectId;
-        io.emit("projects_list", scanAllProjects());
+        debouncedBroadcastProjectList();
       }
     });
 
