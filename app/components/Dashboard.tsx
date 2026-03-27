@@ -45,6 +45,8 @@ interface Metrics {
   usage?: { sessionPercent: number | null; weeklyPercent: number | null; sonnetPercent: number | null; resetAt: string | null; resetLabel: string | null; lastUpdated: string | null; source: string };
   rollingVelocity?: number;
   efficiencyRatio?: number;
+  costHistory?: { timestamp: string; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cost: number; model: string }[];
+  rateLimitHistory?: { timestamp: string; status: string; resetsAt: string }[];
 }
 
 interface SessionInfo { sessionId: string; project: string; startedAt: string; }
