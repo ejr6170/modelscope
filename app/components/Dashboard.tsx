@@ -2557,6 +2557,26 @@ function createDefaultMetrics(): Metrics {
   return { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, turns: 0, toolCalls: 0, elapsed: 0, velocity: 0, startTime: Date.now(), hourlyTurns: 0, topFiles: [], errorCount: 0, activeSubagents: [], plan: undefined, modelBreakdown: [], usage: undefined };
 }
 
+function useHardwareMetrics() {
+  const [hardwareMetrics, setHardwareMetrics] = useState<HwMetrics | null>(null);
+  const [hardwareHistory, setHardwareHistory] = useState<HwMetrics[]>([]);
+
+  useEffect(() => {
+    const hwApi = (window as unknown as Record<string, Record<string, (...args: unknown[]) => void>>).electronAPI;
+    hwApi?.onHardwareMetrics?.((data: unknown) => {
+      const d = data as HwMetrics;
+      setHardwareMetrics(d);
+      setHardwareHistory(prev => {
+        const next = [...prev, d];
+        return next.length > 120 ? next.slice(-120) : next;
+      });
+    });
+    return () => { hwApi?.removeHardwareMetrics?.(); };
+  }, []);
+
+  return { hardwareMetrics, hardwareHistory };
+}
+
 interface AgentNode {
   id: string;
   type: string;
@@ -2589,8 +2609,7 @@ export default function Dashboard() {
   const [activeView, setActiveView] = useState("feed");
   const [updateStatus, setUpdateStatus] = useState("idle");
   const [fileTargets, setFileTargets] = useState<Record<string, "neutral" | "snipe" | "focus">>({});
-  const [hardwareMetrics, setHardwareMetrics] = useState<HwMetrics | null>(null);
-  const [hardwareHistory, setHardwareHistory] = useState<HwMetrics[]>([]);
+  const { hardwareMetrics, hardwareHistory } = useHardwareMetrics();
   const [completedAgents, setCompletedAgents] = useState<AgentNode[]>([]);
   const [agentEvents, setAgentEvents] = useState<Record<string, SessionEvent[]>>({});
   const [settings, updateSettings, resetSettings] = useSettings();
@@ -2724,17 +2743,7 @@ export default function Dashboard() {
       setMetrics(prev => ({ ...prev, usage: data }));
     });
 
-    const hwApi = (window as unknown as Record<string, Record<string, (...args: unknown[]) => void>>).electronAPI;
-    hwApi?.onHardwareMetrics?.((data: unknown) => {
-      const d = data as HwMetrics;
-      setHardwareMetrics(d);
-      setHardwareHistory(prev => {
-        const next = [...prev, d];
-        return next.length > 120 ? next.slice(-120) : next;
-      });
-    });
-
-    return () => { s.disconnect(); hwApi?.removeHardwareMetrics?.(); };
+    return () => { s.disconnect(); };
   }, [scrollBottom]);
 
   return (
