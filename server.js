@@ -5,6 +5,7 @@ import path from "path";
 import os from "os";
 import { findNewestSession, findSubagentLogs, parseSubagentSummary, parseLine, extractEvent } from "./src/parser.js";
 import { getUsage, updateUsage, checkLogEntryForUsage } from "./src/usage-cache.js";
+import { getCursorMetrics } from "./src/cursor-metrics.js";
 
 
 const PORT = 3778;
@@ -450,6 +451,7 @@ function buildMetricsPayload(projectId) {
     efficiencyRatio: projectState.metrics.tokens.output > 0 ? Math.round((projectState.metrics.totalCodeTokens / projectState.metrics.tokens.output) * 100) : 0,
     costHistory: projectState.metrics.costHistory,
     rateLimitHistory: projectState.metrics.rateLimitHistory,
+    cursorMetrics: getCursorMetrics(),
   };
 }
 
