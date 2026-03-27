@@ -2644,6 +2644,12 @@ export default function Dashboard() {
     }
   }, []);
 
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const resetStats = useCallback(() => socketRef.current?.emit("reset_stats"), []);
+  const handleRateLimit = useCallback((data: { status: string; resetsAt: string }) => {
+    socketRef.current?.emit("rate_limit", data);
+  }, []);
 
   useEffect(() => { const iv = setInterval(() => setMetrics(p => ({ ...p, elapsed: Date.now() - p.startTime })), 5000); return () => clearInterval(iv); }, []);
 
@@ -2740,7 +2746,7 @@ export default function Dashboard() {
            WebkitBackdropFilter: settings.blurIntensity === "none" ? "none" : `blur(${settings.blurIntensity === "high" ? 30 : 12}px)`,
            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
          }}>
-      <StatusBar connected={connected} onOpenSettings={() => setSettingsOpen(true)} activeView={activeView} onViewChange={setActiveView} updateStatus={updateStatus} />
+      <StatusBar connected={connected} onOpenSettings={openSettings} activeView={activeView} onViewChange={setActiveView} updateStatus={updateStatus} />
 
       <div className="flex-1 flex min-h-0 h-full">
         <div className="w-[180px] shrink-0 h-full border-r border-white/[0.10] p-0 m-0 relative z-10"
@@ -2806,14 +2812,14 @@ export default function Dashboard() {
 
         <div className="w-[180px] shrink-0 h-full border-l border-white/[0.10] p-0 m-0 relative z-10"
              style={settings.sidebarShadows ? { boxShadow: "-8px 0 16px rgba(0,0,0,0.3)" } : undefined}>
-          <Sidebar metrics={metrics} model={model} session={session} onReset={() => socketRef.current?.emit("reset_stats")} fileTargets={fileTargets} onCycleTarget={cycleFileTarget} snipedCount={snipedFiles.length} hardwareMetrics={hardwareMetrics} />
+          <Sidebar metrics={metrics} model={model} session={session} onReset={resetStats} fileTargets={fileTargets} onCycleTarget={cycleFileTarget} snipedCount={snipedFiles.length} hardwareMetrics={hardwareMetrics} />
         </div>
       </div>
 
-      <CommandBar onRateLimit={(data) => socketRef.current?.emit("rate_limit", data)} />
+      <CommandBar onRateLimit={handleRateLimit} />
 
       <AnimatePresence>
-        {settingsOpen && <SettingsModal settings={settings} onUpdate={updateSettings} onReset={resetSettings} onClose={() => setSettingsOpen(false)} />}
+        {settingsOpen && <SettingsModal settings={settings} onUpdate={updateSettings} onReset={resetSettings} onClose={closeSettings} />}
       </AnimatePresence>
     </div>
   );
