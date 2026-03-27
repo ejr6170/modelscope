@@ -609,7 +609,7 @@ function CodeCard({ card, onLearnMore }: { card: FeedCard; onLearnMore?: () => v
 
   const copyPath = () => {
     const p = card.fullPath || card.filename || "";
-    navigator.clipboard.writeText(p.replace(/\//g, "\\"));
+    navigator.clipboard.writeText(p);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -779,7 +779,7 @@ function DiffModal({ card, onClose }: { card: FeedCard; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
 
   const copyPath = () => {
-    navigator.clipboard.writeText((card.fullPath || card.filename || "").replace(/\//g, "\\"));
+    navigator.clipboard.writeText(card.fullPath || card.filename || "");
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -2113,7 +2113,7 @@ export default function Dashboard() {
       if (agentKey) {
         setAgentEvents(prev => {
           const events = prev[agentKey] || [];
-          const newEvent: AgentEvent = { role: ev.role || "", text: ev.text?.join("\n"), toolUses: ev.toolUses?.map(t => ({ tool: t.tool, input: t.input as Record<string, unknown> | undefined })), timestamp: ev.timestamp };
+          const newEvent: AgentEvent = { role: ev.role || "", text: Array.isArray(ev.text) ? ev.text.join("\n") : ev.text, toolUses: ev.toolUses?.map(t => ({ tool: t.tool, input: t.input as Record<string, unknown> | undefined })), timestamp: ev.timestamp };
           const updated = [...events, newEvent];
           return { ...prev, [agentKey]: updated.length > 50 ? updated.slice(-50) : updated };
         });
