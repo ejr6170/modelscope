@@ -91,6 +91,15 @@ export function extractEvent(entry) {
     return { ...base, subtype: entry.subtype, content: entry.content };
   }
 
+  if (entry.type === "rate_limit_event" && entry.rate_limit_info) {
+    return {
+      ...base,
+      type: "rateLimit",
+      status: entry.rate_limit_info.status || "unknown",
+      resetsAt: entry.rate_limit_info.resetsAt || "",
+    };
+  }
+
   if (entry.type === "user" && entry.message?.role === "user") {
     const msg = entry.message;
     const blocks = Array.isArray(msg.content) ? msg.content : [{ type: "text", text: msg.content }];
