@@ -1316,6 +1316,142 @@ function AgentsView({ activeAgents, completedAgents, agentEvents, session, metri
   );
 }
 
+function CursorFlowView({ cursorMetrics }: { cursorMetrics: CursorMetrics | null }) {
+  if (!cursorMetrics) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="mx-auto w-10 h-10 rounded-full border border-white/[0.07] flex items-center justify-center bg-white/[0.03]">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-txt-secondary"><path d="M4 17l6-6-6-6M12 19h8" /></svg>
+          </div>
+          <p className="text-[11px] font-sans font-medium text-txt-secondary">Cursor not detected</p>
+          <p className="text-[9px] font-sans text-txt-tertiary">No AI tracking database found</p>
+        </div>
+      </div>
+    );
+  }
+
+  const { totalHashes, composerHashes, humanHashes, aiPercentage, activeModel, trackingSince, dailyActivity, topFiles, commits } = cursorMetrics;
+  const maxDaily = Math.max(...dailyActivity.map(d => d.composer + d.human), 1);
+  const maxFileCount = Math.max(...topFiles.map(f => f.count), 1);
+  const cleanModel = activeModel.replace(/^claude-/, "").replace(/-high-thinking$/, "");
+
+  const extColor = (ext: string) => {
+    if (ext === ".tsx") return "rgb(34, 211, 238)";
+    if (ext === ".ts") return "rgb(129, 140, 248)";
+    if (ext === ".js") return "rgb(251, 191, 36)";
+    return "rgb(156, 163, 175)";
+  };
+
+  return (
+    <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-4 gap-2">
+        <div className="rounded-xl border border-white/[0.07] p-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="text-[8px] font-sans font-medium text-txt-tertiary uppercase tracking-wider mb-1">AI Contributions</div>
+          <div className="text-lg font-mono font-bold text-txt-primary">{totalHashes.toLocaleString()}</div>
+          <div className="text-[9px] font-sans text-txt-tertiary mt-0.5">
+            <span className="text-cyan-400">{composerHashes}</span> composer &middot; <span className="text-amber-400">{humanHashes}</span> human
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/[0.07] p-3 flex items-center gap-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <ProgressRing pct={aiPercentage} size={40} stroke={3} />
+          <div>
+            <div className="text-[8px] font-sans font-medium text-txt-tertiary uppercase tracking-wider mb-0.5">AI vs Human</div>
+            <div className="text-sm font-mono font-bold text-txt-primary">{aiPercentage.toFixed(1)}%</div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-white/[0.07] p-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="text-[8px] font-sans font-medium text-txt-tertiary uppercase tracking-wider mb-1">Active Model</div>
+          <div className="text-[11px] font-mono font-bold text-indigo-300 truncate">{cleanModel}</div>
+        </div>
+
+        <div className="rounded-xl border border-white/[0.07] p-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="text-[8px] font-sans font-medium text-txt-tertiary uppercase tracking-wider mb-1">Tracking Since</div>
+          <div className="text-[11px] font-mono font-bold text-txt-primary">
+            {trackingSince ? new Date(trackingSince).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "\u2014"}
+          </div>
+        </div>
+      </div>
+
+      {/* Daily Activity Timeline */}
+      <div className="rounded-xl border border-white/[0.07] p-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[8px] font-sans font-medium text-txt-tertiary uppercase tracking-wider">Daily Activity (30d)</div>
+          <div className="flex items-center gap-3 text-[8px] font-sans text-txt-tertiary">
+            <span><span className="inline-block w-2 h-2 rounded-sm mr-1" style={{ background: "rgb(34, 211, 238)" }} />Composer</span>
+            <span><span className="inline-block w-2 h-2 rounded-sm mr-1" style={{ background: "rgb(251, 191, 36)" }} />Human</span>
+          </div>
+        </div>
+        <div className="overflow-x-auto" ref={el => { if (el) el.scrollLeft = el.scrollWidth; }}>
+          <svg width={Math.max(dailyActivity.length * 20, 200)} height={120} className="block">
+            {dailyActivity.map((d, i) => {
+              const composerH = (d.composer / maxDaily) * 100;
+              const humanH = (d.human / maxDaily) * 100;
+              const x = i * 20 + 4;
+              return (
+                <g key={d.date}>
+                  <rect x={x} y={110 - composerH - humanH} width={8} height={humanH} rx={2} fill="rgb(251, 191, 36)" opacity={0.7}>
+                    <title>{d.date}: {d.human} human</title>
+                  </rect>
+                  <rect x={x} y={110 - composerH} width={8} height={composerH} rx={2} fill="rgb(34, 211, 238)" opacity={0.8}>
+                    <title>{d.date}: {d.composer} composer</title>
+                  </rect>
+                </g>
+              );
+            })}
+            <line x1="0" y1="110" x2={dailyActivity.length * 20} y2="110" stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+          </svg>
+        </div>
+      </div>
+
+      {/* Bottom Row: Top Files + Commit Scores */}
+      <div className="grid grid-cols-2 gap-2">
+        {/* Top Files */}
+        <div className="rounded-xl border border-white/[0.07] p-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="text-[8px] font-sans font-medium text-txt-tertiary uppercase tracking-wider mb-2">Top Files by AI Contribution</div>
+          <div className="space-y-1">
+            {topFiles.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 text-[9px] font-sans">
+                <span className="w-3 h-3 rounded flex items-center justify-center shrink-0" style={{ background: extColor(f.fileExtension) + "22", color: extColor(f.fileExtension) }}>
+                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                </span>
+                <span className="truncate text-txt-secondary flex-1 min-w-0">{f.fileName}</span>
+                <span className="text-[8px] font-mono text-txt-tertiary shrink-0">{f.count}</span>
+                <div className="w-16 h-1.5 rounded-full bg-white/[0.04] shrink-0 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${(f.count / maxFileCount) * 100}%`, background: extColor(f.fileExtension), opacity: 0.6 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Commit Scores */}
+        <div className="rounded-xl border border-white/[0.07] p-3" style={{ background: "rgba(255,255,255,0.02)" }}>
+          <div className="text-[8px] font-sans font-medium text-txt-tertiary uppercase tracking-wider mb-2">Commit Scores</div>
+          <div className="space-y-1 max-h-[240px] overflow-y-auto">
+            {commits.length === 0 && <div className="text-[9px] text-txt-tertiary">No scored commits yet</div>}
+            {commits.map((c, i) => (
+              <div key={i} className="flex items-center gap-2 text-[9px] font-sans py-0.5 border-b border-white/[0.03] last:border-0">
+                <span className="truncate text-txt-secondary flex-1 min-w-0">{c.commitMessage.slice(0, 60)}</span>
+                <span className="text-[8px] font-mono text-emerald-400/70 shrink-0">+{c.linesAdded}</span>
+                <span className="text-[8px] font-mono text-red-400/70 shrink-0">-{c.linesDeleted}</span>
+                <span className={`text-[8px] font-mono font-bold shrink-0 px-1 py-0.5 rounded ${
+                  c.aiPercentage >= 80 ? "text-red-400 bg-red-500/10" :
+                  c.aiPercentage >= 50 ? "text-amber-400 bg-amber-500/10" :
+                  "text-emerald-400 bg-emerald-500/10"
+                }`}>{c.aiPercentage.toFixed(0)}% AI</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FlowView({ metrics }: { metrics: Metrics }) {
   const usage = metrics.usage;
   const sessionPct = usage?.sessionPercent ?? null;
