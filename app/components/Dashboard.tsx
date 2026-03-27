@@ -1462,9 +1462,15 @@ const ClaudeFlowContent = React.memo(function ClaudeFlowContent({ metrics }: { m
   const weeklyPct = usage?.weeklyPercent ?? null;
   const resetLabel = usage?.resetLabel || null;
   const elapsed = metrics.elapsed || 1;
-  const costPerHour = elapsed > 0 ? (metrics.cost / (elapsed / 3600000)) : 0;
-  const totalIn = metrics.tokens.input + metrics.tokens.cacheRead;
-  const cacheHitPct = totalIn > 0 ? Math.round((metrics.tokens.cacheRead / totalIn) * 100) : 0;
+
+  const { costPerHour, cacheHitPct, maxCost } = useMemo(() => {
+    const totalIn = metrics.tokens.input + metrics.tokens.cacheRead;
+    return {
+      costPerHour: elapsed > 0 ? (metrics.cost / (elapsed / 3600000)) : 0,
+      cacheHitPct: totalIn > 0 ? Math.round((metrics.tokens.cacheRead / totalIn) * 100) : 0,
+      maxCost: Math.max(...(metrics.costHistory || []).map(h => h.cost), 0.0001),
+    };
+  }, [metrics.tokens, metrics.cost, elapsed, metrics.costHistory]);
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const stickyRight = useRef(true);
@@ -1542,7 +1548,6 @@ const ClaudeFlowContent = React.memo(function ClaudeFlowContent({ metrics }: { m
             <span className="text-[9px] font-mono text-txt-tertiary">No cost data yet</span>
           </div>
         );
-        const maxCost = Math.max(...history.map(h => h.cost), 0.0001);
         const barW = 8, gap = 2, chartH = 120;
         const svgW = history.length * (barW + gap);
         return (
@@ -2389,6 +2394,17 @@ function HistoryChart({ history, width = 500, height = 100 }: { history: { cpu: 
 }
 
 const MonitorView = React.memo(function MonitorView({ current, history }: { current: HwMetrics | null; history: HwMetrics[] }) {
+  const { cpuSparkline, memSparkline, cpuPeak, memPeak } = useMemo(() => {
+    const cpuH = history.map(h => h.cpu.percent);
+    const memH = history.map(h => h.memory.percent);
+    return {
+      cpuSparkline: cpuH.slice(-60),
+      memSparkline: memH.slice(-60),
+      cpuPeak: cpuH.length > 0 ? Math.max(...cpuH) : 0,
+      memPeak: memH.length > 0 ? Math.max(...memH) : 0,
+    };
+  }, [history]);
+
   if (!current) return (
     <div className="flex items-center justify-center h-full">
       <p className="text-[11px] font-sans text-txt-tertiary">Waiting for hardware data...</p>
@@ -2396,13 +2412,6 @@ const MonitorView = React.memo(function MonitorView({ current, history }: { curr
   );
 
   const { cpu, memory, gpu, processes } = current;
-
-  const cpuHistory = history.map(h => h.cpu.percent);
-  const memHistory = history.map(h => h.memory.percent);
-  const cpuSparkline = cpuHistory.slice(-60);
-  const memSparkline = memHistory.slice(-60);
-  const cpuPeak = cpuHistory.length > 0 ? Math.max(...cpuHistory) : 0;
-  const memPeak = memHistory.length > 0 ? Math.max(...memHistory) : 0;
 
   return (
     <div className="p-4 space-y-4 overflow-y-auto h-full">
