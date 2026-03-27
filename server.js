@@ -286,8 +286,8 @@ function processEvent(projectId, event) {
   if (event.type === "rateLimit") {
     projectState.metrics.rateLimitHistory.push({
       timestamp: new Date().toISOString(),
-      status: event.status,
-      resetsAt: event.resetsAt,
+      status: event.status || "unknown",
+      resetsAt: event.resetsAt || "",
     });
     if (projectState.metrics.rateLimitHistory.length > 50) projectState.metrics.rateLimitHistory.shift();
     emitToProjectViewers(projectId, "metrics", buildMetricsPayload(projectId));
