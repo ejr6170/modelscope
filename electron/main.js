@@ -114,6 +114,7 @@ function createWindow() {
 
   let activeProc = null;
   let isFirstPrompt = true;
+  let cancelled = false;
 
   function parseStreamLine(line) {
     try {
@@ -170,6 +171,7 @@ function createWindow() {
       activeProc.kill();
       activeProc = null;
     }
+    cancelled = false;
 
     const args = ["-p", "--output-format", "stream-json", "--verbose"];
     if (!isFirstPrompt) args.push("-c");
@@ -205,6 +207,7 @@ function createWindow() {
     proc.stderr.on("data", () => {});
 
     proc.on("close", (code) => {
+      if (cancelled) return;
       if (buffer.trim()) {
         const parsed = parseStreamLine(buffer);
         if (parsed) mainWindow?.webContents.send("stream-event", parsed);
@@ -212,12 +215,13 @@ function createWindow() {
       if (hardwareMonitor) hardwareMonitor.setRootPid(null);
       mainWindow?.webContents.send("stream-event", { type: "done", exitCode: code });
       activeProc = null;
-      isFirstPrompt = false;
+      if (code === 0) isFirstPrompt = false;
     });
   });
 
   ipcMain.on("cancel-stream", () => {
     if (activeProc) {
+      cancelled = true;
       activeProc.kill();
       activeProc = null;
       if (hardwareMonitor) hardwareMonitor.setRootPid(null);
