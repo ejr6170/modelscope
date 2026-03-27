@@ -655,6 +655,8 @@ function CodeCard({ card, onLearnMore }: { card: FeedCard; onLearnMore?: () => v
   const [expanded, setExpanded] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (copyTimerRef.current) clearTimeout(copyTimerRef.current); }, []);
   const isDiff = !!card.diff;
 
   const totalLines = isDiff
@@ -677,7 +679,8 @@ function CodeCard({ card, onLearnMore }: { card: FeedCard; onLearnMore?: () => v
     const p = card.fullPath || card.filename || "";
     navigator.clipboard.writeText(p.replace(/\//g, "\\"));
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
   };
 
   return (
@@ -742,6 +745,10 @@ function CodeLines({ code, maxLines, showLineNums, startLine = 1, isNewFile, onL
   const [hoveredEl, setHoveredEl] = useState<{ el: HTMLElement; term: string } | null>(null);
   const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (enterTimerRef.current) clearTimeout(enterTimerRef.current);
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+  }, []);
 
   const handleMouseOver = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -791,6 +798,10 @@ function DiffLines({ removed, added, maxLines, showLineNums, startLine = 1, onLe
   const [hoveredEl, setHoveredEl] = useState<{ el: HTMLElement; term: string } | null>(null);
   const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (enterTimerRef.current) clearTimeout(enterTimerRef.current);
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+  }, []);
 
   const handleMouseOver = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
@@ -2667,6 +2678,7 @@ export default function Dashboard() {
   const feedRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
   const socketRef = useRef<Socket | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { completedAgents, agentEvents, setAgentEvents, resetAgentState } = useAgentState(socketRef);
   const [settings, updateSettings, resetSettings] = useSettings();
 
@@ -2711,7 +2723,8 @@ export default function Dashboard() {
     if (el && feedRef.current) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       setHighlightedCardId(cardId);
-      setTimeout(() => setHighlightedCardId(null), 2000);
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => setHighlightedCardId(null), 2000);
     }
   }, []);
 
@@ -2720,6 +2733,10 @@ export default function Dashboard() {
   const resetStats = useCallback(() => socketRef.current?.emit("reset_stats"), []);
   const handleRateLimit = useCallback((data: { status: string; resetsAt: string }) => {
     socketRef.current?.emit("rate_limit", data);
+  }, []);
+
+  useEffect(() => () => {
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
   }, []);
 
   useEffect(() => { const iv = setInterval(() => setMetrics(p => ({ ...p, elapsed: Date.now() - p.startTime })), 5000); return () => clearInterval(iv); }, []);
