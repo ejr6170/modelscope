@@ -196,6 +196,63 @@ function formatTranscriptTool(name: string, input: Record<string, unknown>): str
   }
 }
 
+const CONCEPT_DB: Record<string, { title: string; def: string }> = {
+  "useState": { title: "React Hooks: State", def: "Declares a reactive state variable. Re-renders the component when the value changes." },
+  "useEffect": { title: "React Hooks: Side Effects", def: "Runs code after render — used for subscriptions, data fetching, and DOM mutations." },
+  "useCallback": { title: "React Hooks: Memoized Callback", def: "Returns a stable function reference to prevent unnecessary child re-renders." },
+  "useMemo": { title: "React Hooks: Memoization", def: "Caches a computed value, recalculating only when dependencies change." },
+  "useRef": { title: "React Hooks: Ref", def: "Holds a mutable value that persists across renders without triggering re-render." },
+  "async": { title: "Async/Await", def: "Syntactic sugar over Promises, enabling sequential-looking asynchronous code." },
+  "await": { title: "Async/Await", def: "Pauses execution until a Promise resolves, returning the unwrapped value." },
+  "interface": { title: "TypeScript Interface", def: "Defines a contract for object shapes — enables compile-time type checking." },
+  "type": { title: "TypeScript Type Alias", def: "Creates a named type that can represent unions, intersections, or complex shapes." },
+  "Map": { title: "Hash Map (Map)", def: "Key-value store with O(1) average lookup. Preserves insertion order unlike plain objects." },
+  "Set": { title: "Set (Unique Collection)", def: "Stores unique values with O(1) has/add/delete. Used for deduplication." },
+  "Promise": { title: "Promise", def: "Represents an eventual value. Chains with .then() or unwraps with await." },
+  "Socket": { title: "WebSocket (Socket.io)", def: "Persistent bidirectional connection for real-time server→client data push." },
+  "AnimatePresence": { title: "Framer Motion: AnimatePresence", def: "Enables exit animations for components being removed from the React tree." },
+  "motion": { title: "Framer Motion: motion", def: "Wraps elements with declarative animation props (initial, animate, exit)." },
+  "middleware": { title: "Middleware Pattern", def: "Intercepts requests/responses in a pipeline. Common in Express, Redux, Next.js." },
+  "debounce": { title: "Debouncing", def: "Delays execution until input stops for N ms. Prevents rapid-fire function calls." },
+  "throttle": { title: "Throttling", def: "Limits execution to at most once per N ms. Ensures consistent update frequency." },
+  "memoize": { title: "Memoization", def: "Caches function results for given inputs. Trades memory for CPU time." },
+  "recursion": { title: "Recursion", def: "A function that calls itself with a smaller subproblem until a base case is reached." },
+  "closure": { title: "Closure", def: "A function that captures variables from its outer scope, retaining access after the outer function returns." },
+  "spawn": { title: "Child Process (spawn)", def: "Launches a new OS process. Returns streams for stdout/stderr piping." },
+  "chokidar": { title: "File Watcher (chokidar)", def: "Cross-platform file system watcher. Emits events on file create/change/delete." },
+  "Observable": { title: "Observable Pattern", def: "Push-based data stream. Subscribers receive values over time until completion." },
+  "reducer": { title: "Reducer Pattern", def: "Pure function (state, action) → newState. Central to Redux and useReducer." },
+  "context": { title: "React Context", def: "Provides values down the component tree without prop drilling." },
+  "portal": { title: "React Portal", def: "Renders children into a different DOM node, useful for modals and overlays." },
+  "generic": { title: "TypeScript Generics", def: "Parameterized types that enable type-safe reusable code (e.g., Array<T>)." },
+  "extends": { title: "Inheritance / Constraint", def: "In classes: prototype chain. In generics: constrains T to a subtype." },
+  "enum": { title: "TypeScript Enum", def: "Named set of constants. Compiles to a lookup object for bidirectional mapping." },
+  "namespace": { title: "TypeScript Namespace", def: "Logical grouping of declarations. Avoids global scope pollution in large codebases." },
+  "filter": { title: "Array.filter()", def: "Returns a new array containing only elements that pass the predicate test." },
+  "reduce": { title: "Array.reduce()", def: "Accumulates array elements into a single value via a reducer function." },
+  "useReducer": { title: "React Hooks: useReducer", def: "State management via (state, action) dispatch. Preferred over useState for complex state logic." },
+  "useContext": { title: "React Hooks: useContext", def: "Reads a React Context value. Re-renders when the context provider updates." },
+  "useLayoutEffect": { title: "React Hooks: useLayoutEffect", def: "Like useEffect but fires synchronously after DOM mutations, before paint." },
+  "forwardRef": { title: "React: forwardRef", def: "Passes a ref through a component to a child DOM element or component." },
+  "createPortal": { title: "React: createPortal", def: "Renders children into a DOM node outside the parent component hierarchy." },
+  "Suspense": { title: "React: Suspense", def: "Displays a fallback while waiting for lazy-loaded components or async data." },
+  "EventEmitter": { title: "Event Emitter", def: "Pub/sub pattern — objects emit named events and listeners react to them." },
+  "fetch": { title: "Fetch API", def: "Browser-native HTTP client returning Promises. Replaces XMLHttpRequest." },
+  "WebSocket": { title: "WebSocket", def: "Full-duplex TCP connection for real-time bidirectional communication." },
+  "requestAnimationFrame": { title: "requestAnimationFrame", def: "Schedules a callback before the next repaint. Standard for smooth 60fps animations." },
+  "IntersectionObserver": { title: "Intersection Observer", def: "Asynchronously observes element visibility changes. Used for lazy loading and infinite scroll." },
+  "AbortController": { title: "AbortController", def: "Cancels in-flight fetch requests or other async operations via an abort signal." },
+  "Symbol": { title: "Symbol (ES6)", def: "Unique, immutable primitive. Used as object property keys to avoid name collisions." },
+  "Proxy": { title: "ES6 Proxy", def: "Intercepts and redefines fundamental operations (get, set, delete) on an object." },
+  "WeakMap": { title: "WeakMap", def: "Key-value store where keys are weakly held — allows garbage collection of key objects." },
+  "Generator": { title: "Generator Function", def: "Pausable function using yield. Returns an iterator for lazy value production." },
+  "Iterator": { title: "Iterator Protocol", def: "An object with a next() method returning { value, done }. Powers for...of loops." },
+};
+const _conceptKeys = Object.keys(CONCEPT_DB).filter(k => k.length > 3);
+const _conceptRe = _conceptKeys.length > 0
+  ? new RegExp(`\\b(${_conceptKeys.join("|")})\\b`, "gi")
+  : null;
+
 function highlightSyntax(code: string, hotspots = false): string {
   const escaped = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const tokenEntries: { text: string; c?: string }[] = []; let remaining = escaped;
@@ -212,19 +269,18 @@ function highlightSyntax(code: string, hotspots = false): string {
     if (!matched) { const last = tokenEntries[tokenEntries.length - 1]; if (last && !last.c) last.text += remaining[0]; else tokenEntries.push({ text: remaining[0] }); remaining = remaining.slice(1); }
   }
   if (hotspots) {
-    const conceptKeys = Object.keys(CONCEPT_DB).filter(k => k.length > 3);
-    const conceptRe = conceptKeys.length > 0 ? new RegExp(`\\b(${conceptKeys.join("|")})\\b`, "gi") : null;
+    const conceptRe = hotspots ? _conceptRe : null;
 
     return tokenEntries.map(tokenEntry => {
       const text = tokenEntry.text;
-      const dbKey = conceptKeys.find(k => k === text || k.toLowerCase() === text.toLowerCase());
+      const dbKey = _conceptKeys.find(k => k === text || k.toLowerCase() === text.toLowerCase());
       if (dbKey && CONCEPT_DB[dbKey]) {
         return `<span class="mentor-hotspot${tokenEntry.c ? " " + tokenEntry.c : ""}" data-concept="${dbKey}">${text}</span>`;
       }
       if (conceptRe && text.length > 6) {
         let hasMatch = false;
         const replaced = text.replace(conceptRe, (match) => {
-          const key = conceptKeys.find(k => k.toLowerCase() === match.toLowerCase());
+          const key = _conceptKeys.find(k => k.toLowerCase() === match.toLowerCase());
           if (key) { hasMatch = true; return `</span><span class="mentor-hotspot" data-concept="${key}">${match}</span><span class="${tokenEntry.c || ""}">`; }
           return match;
         });
@@ -300,59 +356,6 @@ function CostBadge({ tokens, cost, inputTokens, outputTokens }: { tokens?: numbe
     </span>
   );
 }
-
-const CONCEPT_DB: Record<string, { title: string; def: string }> = {
-  "useState": { title: "React Hooks: State", def: "Declares a reactive state variable. Re-renders the component when the value changes." },
-  "useEffect": { title: "React Hooks: Side Effects", def: "Runs code after render — used for subscriptions, data fetching, and DOM mutations." },
-  "useCallback": { title: "React Hooks: Memoized Callback", def: "Returns a stable function reference to prevent unnecessary child re-renders." },
-  "useMemo": { title: "React Hooks: Memoization", def: "Caches a computed value, recalculating only when dependencies change." },
-  "useRef": { title: "React Hooks: Ref", def: "Holds a mutable value that persists across renders without triggering re-render." },
-  "async": { title: "Async/Await", def: "Syntactic sugar over Promises, enabling sequential-looking asynchronous code." },
-  "await": { title: "Async/Await", def: "Pauses execution until a Promise resolves, returning the unwrapped value." },
-  "interface": { title: "TypeScript Interface", def: "Defines a contract for object shapes — enables compile-time type checking." },
-  "type": { title: "TypeScript Type Alias", def: "Creates a named type that can represent unions, intersections, or complex shapes." },
-  "Map": { title: "Hash Map (Map)", def: "Key-value store with O(1) average lookup. Preserves insertion order unlike plain objects." },
-  "Set": { title: "Set (Unique Collection)", def: "Stores unique values with O(1) has/add/delete. Used for deduplication." },
-  "Promise": { title: "Promise", def: "Represents an eventual value. Chains with .then() or unwraps with await." },
-  "Socket": { title: "WebSocket (Socket.io)", def: "Persistent bidirectional connection for real-time server→client data push." },
-  "AnimatePresence": { title: "Framer Motion: AnimatePresence", def: "Enables exit animations for components being removed from the React tree." },
-  "motion": { title: "Framer Motion: motion", def: "Wraps elements with declarative animation props (initial, animate, exit)." },
-  "middleware": { title: "Middleware Pattern", def: "Intercepts requests/responses in a pipeline. Common in Express, Redux, Next.js." },
-  "debounce": { title: "Debouncing", def: "Delays execution until input stops for N ms. Prevents rapid-fire function calls." },
-  "throttle": { title: "Throttling", def: "Limits execution to at most once per N ms. Ensures consistent update frequency." },
-  "memoize": { title: "Memoization", def: "Caches function results for given inputs. Trades memory for CPU time." },
-  "recursion": { title: "Recursion", def: "A function that calls itself with a smaller subproblem until a base case is reached." },
-  "closure": { title: "Closure", def: "A function that captures variables from its outer scope, retaining access after the outer function returns." },
-  "spawn": { title: "Child Process (spawn)", def: "Launches a new OS process. Returns streams for stdout/stderr piping." },
-  "chokidar": { title: "File Watcher (chokidar)", def: "Cross-platform file system watcher. Emits events on file create/change/delete." },
-  "Observable": { title: "Observable Pattern", def: "Push-based data stream. Subscribers receive values over time until completion." },
-  "reducer": { title: "Reducer Pattern", def: "Pure function (state, action) → newState. Central to Redux and useReducer." },
-  "context": { title: "React Context", def: "Provides values down the component tree without prop drilling." },
-  "portal": { title: "React Portal", def: "Renders children into a different DOM node, useful for modals and overlays." },
-  "generic": { title: "TypeScript Generics", def: "Parameterized types that enable type-safe reusable code (e.g., Array<T>)." },
-  "extends": { title: "Inheritance / Constraint", def: "In classes: prototype chain. In generics: constrains T to a subtype." },
-  "enum": { title: "TypeScript Enum", def: "Named set of constants. Compiles to a lookup object for bidirectional mapping." },
-  "namespace": { title: "TypeScript Namespace", def: "Logical grouping of declarations. Avoids global scope pollution in large codebases." },
-  "filter": { title: "Array.filter()", def: "Returns a new array containing only elements that pass the predicate test." },
-  "reduce": { title: "Array.reduce()", def: "Accumulates array elements into a single value via a reducer function." },
-  "useReducer": { title: "React Hooks: useReducer", def: "State management via (state, action) dispatch. Preferred over useState for complex state logic." },
-  "useContext": { title: "React Hooks: useContext", def: "Reads a React Context value. Re-renders when the context provider updates." },
-  "useLayoutEffect": { title: "React Hooks: useLayoutEffect", def: "Like useEffect but fires synchronously after DOM mutations, before paint." },
-  "forwardRef": { title: "React: forwardRef", def: "Passes a ref through a component to a child DOM element or component." },
-  "createPortal": { title: "React: createPortal", def: "Renders children into a DOM node outside the parent component hierarchy." },
-  "Suspense": { title: "React: Suspense", def: "Displays a fallback while waiting for lazy-loaded components or async data." },
-  "EventEmitter": { title: "Event Emitter", def: "Pub/sub pattern — objects emit named events and listeners react to them." },
-  "fetch": { title: "Fetch API", def: "Browser-native HTTP client returning Promises. Replaces XMLHttpRequest." },
-  "WebSocket": { title: "WebSocket", def: "Full-duplex TCP connection for real-time bidirectional communication." },
-  "requestAnimationFrame": { title: "requestAnimationFrame", def: "Schedules a callback before the next repaint. Standard for smooth 60fps animations." },
-  "IntersectionObserver": { title: "Intersection Observer", def: "Asynchronously observes element visibility changes. Used for lazy loading and infinite scroll." },
-  "AbortController": { title: "AbortController", def: "Cancels in-flight fetch requests or other async operations via an abort signal." },
-  "Symbol": { title: "Symbol (ES6)", def: "Unique, immutable primitive. Used as object property keys to avoid name collisions." },
-  "Proxy": { title: "ES6 Proxy", def: "Intercepts and redefines fundamental operations (get, set, delete) on an object." },
-  "WeakMap": { title: "WeakMap", def: "Key-value store where keys are weakly held — allows garbage collection of key objects." },
-  "Generator": { title: "Generator Function", def: "Pausable function using yield. Returns an iterator for lazy value production." },
-  "Iterator": { title: "Iterator Protocol", def: "An object with a next() method returning { value, done }. Powers for...of loops." },
-};
 
 interface DetectedConcept { key: string; title: string; def: string; firstCardId: string; }
 
