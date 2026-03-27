@@ -1452,7 +1452,7 @@ function CursorFlowView({ cursorMetrics }: { cursorMetrics: CursorMetrics | null
   );
 }
 
-function FlowView({ metrics }: { metrics: Metrics }) {
+function ClaudeFlowContent({ metrics }: { metrics: Metrics }) {
   const usage = metrics.usage;
   const sessionPct = usage?.sessionPercent ?? null;
   const weeklyPct = usage?.weeklyPercent ?? null;
@@ -1707,6 +1707,31 @@ function FlowView({ metrics }: { metrics: Metrics }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function FlowView({ metrics }: { metrics: Metrics }) {
+  const [provider, setProvider] = useState<"claude" | "cursor">("claude");
+  return (
+    <div className="h-full flex flex-col overflow-y-auto">
+      <div className="shrink-0 flex items-center gap-1 px-4 pt-3 pb-1">
+        {(["claude", "cursor"] as const).map(p => (
+          <button key={p} onClick={() => setProvider(p)}
+            className={`px-3 py-1 rounded-full text-[9px] font-sans font-bold tracking-wider uppercase transition-all duration-200 ${
+              provider === p
+                ? "bg-indigo-500/20 text-indigo-300 shadow-[0_0_8px_rgba(99,102,241,0.2)]"
+                : "text-txt-tertiary hover:text-txt-secondary hover:bg-white/[0.04]"
+            }`}>
+            {p === "claude" ? "Claude Code" : "Cursor"}
+          </button>
+        ))}
+      </div>
+      {provider === "cursor" ? (
+        <CursorFlowView cursorMetrics={metrics.cursorMetrics ?? null} />
+      ) : (
+        <ClaudeFlowContent metrics={metrics} />
+      )}
     </div>
   );
 }
