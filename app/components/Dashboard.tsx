@@ -1332,6 +1332,15 @@ const AgentsView = React.memo(function AgentsView({ activeAgents, completedAgent
 });
 
 const CursorFlowView = React.memo(function CursorFlowView({ cursorMetrics }: { cursorMetrics: CursorMetrics | null }) {
+  const chartScrollRef = useRef<HTMLDivElement>(null);
+  const [isChartSticky, setIsChartSticky] = useState(true);
+
+  useEffect(() => {
+    if (isChartSticky && chartScrollRef.current) {
+      chartScrollRef.current.scrollLeft = chartScrollRef.current.scrollWidth;
+    }
+  }, [cursorMetrics?.dailyActivity, isChartSticky]);
+
   if (!cursorMetrics) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -1400,7 +1409,11 @@ const CursorFlowView = React.memo(function CursorFlowView({ cursorMetrics }: { c
             <span><span className="inline-block w-2 h-2 rounded-sm mr-1" style={{ background: "rgb(251, 191, 36)" }} />Human</span>
           </div>
         </div>
-        <div className="overflow-x-auto" ref={el => { if (el) el.scrollLeft = el.scrollWidth; }}>
+        <div className="overflow-x-auto" ref={chartScrollRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setIsChartSticky(el.scrollWidth - el.scrollLeft - el.clientWidth < 20);
+          }}>
           <svg width={Math.max(dailyActivity.length * 20, 200)} height={120} className="block">
             {dailyActivity.map((d, i) => {
               const composerH = (d.composer / maxDaily) * 100;
@@ -2696,6 +2709,8 @@ export default function Dashboard() {
 
   const onScroll = useCallback(() => { if (!feedRef.current) return; autoScroll.current = feedRef.current.scrollHeight - feedRef.current.scrollTop - feedRef.current.clientHeight < 80; }, []);
   const scrollBottom = useCallback(() => { if (autoScroll.current && feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight; }, []);
+  const scrollBottomRef = useRef(scrollBottom);
+  useEffect(() => { scrollBottomRef.current = scrollBottom; });
 
   const dismissError = useCallback((id: string) => {
     setPinnedErrors(prev => prev.filter(e => e.id !== id));
@@ -2770,20 +2785,20 @@ export default function Dashboard() {
       const historyCards: FeedCard[] = [];
       for (const ev of evts) { historyCards.push(...eventToCards(ev)); if (ev.model) setModel(ev.model); }
       setCards(historyCards.slice(-MAX_CARDS));
-      setTimeout(scrollBottom, 150);
+      setTimeout(() => scrollBottomRef.current(), 150);
     });
 
     s.on("event", (ev: SessionEvent) => {
       const newCards = eventToCards(ev); if (!newCards.length) return;
       if (ev.model) setModel(ev.model);
       setCards(p => { const combined = [...p, ...newCards]; return combined.length > MAX_CARDS ? combined.slice(-MAX_CARDS) : combined; });
-      setTimeout(scrollBottom, 80);
+      setTimeout(() => scrollBottomRef.current(), 80);
     });
 
     s.on("subagent_event", (ev: SessionEvent & { toolUseId?: string; agentId?: string }) => {
       const newCards = eventToCards(ev); if (!newCards.length) return;
       setCards(p => { const combined = [...p, ...newCards]; return combined.length > MAX_CARDS ? combined.slice(-MAX_CARDS) : combined; });
-      setTimeout(scrollBottom, 80);
+      setTimeout(() => scrollBottomRef.current(), 80);
     });
 
     s.on("pinned_errors", (errs: PinnedError[]) => setPinnedErrors(errs));
@@ -2793,7 +2808,7 @@ export default function Dashboard() {
     });
 
     return () => { s.disconnect(); };
-  }, [scrollBottom]);
+  }, []);
 
   return (
     <div className={`h-screen w-screen flex flex-col overflow-hidden rounded-2xl border ${overBudget ? "border-red-500/50 animate-pulse" : "border-white/[0.10]"}`}
