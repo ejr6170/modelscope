@@ -2745,9 +2745,9 @@ export default function Dashboard() {
         </div>
 
         <div className="flex-1 w-0 min-w-0 h-full flex flex-col mx-[-1px] p-0 m-0 relative z-0">
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="popLayout">
             {activeView === "feed" && (
-              <motion.div key="feed-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="flex-1 flex flex-col min-h-0">
+              <motion.div key="feed-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, position: "absolute" as const, inset: 0 }} transition={{ duration: 0.15 }} className="flex-1 flex flex-col min-h-0">
                 <PinnedErrors errors={pinnedErrors} onDismiss={dismissError} />
                 <div ref={feedRef} onScroll={onScroll} data-feed className="flex-1 overflow-y-auto overflow-x-hidden">
                   {cards.length === 0 ? (
@@ -2777,7 +2777,7 @@ export default function Dashboard() {
               </motion.div>
             )}
             {activeView === "agents" && (
-              <motion.div key="agents-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="flex-1 min-h-0">
+              <motion.div key="agents-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, position: "absolute" as const, inset: 0 }} transition={{ duration: 0.15 }} className="flex-1 min-h-0">
                 <AgentsView
                   activeAgents={metrics.activeSubagents || []}
                   completedAgents={completedAgents}
@@ -2788,12 +2788,12 @@ export default function Dashboard() {
               </motion.div>
             )}
             {activeView === "flow" && (
-              <motion.div key="flow-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="flex-1 min-h-0">
+              <motion.div key="flow-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, position: "absolute" as const, inset: 0 }} transition={{ duration: 0.15 }} className="flex-1 min-h-0">
                 <FlowView metrics={metrics} />
               </motion.div>
             )}
             {activeView === "monitor" && (
-              <motion.div key="monitor-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="flex-1 min-h-0">
+              <motion.div key="monitor-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, position: "absolute" as const, inset: 0 }} transition={{ duration: 0.15 }} className="flex-1 min-h-0">
                 <MonitorView current={hardwareMetrics} history={hardwareHistory} />
               </motion.div>
             )}
