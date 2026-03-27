@@ -247,6 +247,7 @@ function createWindow() {
     }
 
     proc.on("close", (code) => {
+      if (closed) return;
       if (buffer.trim()) {
         const parsed = parseStreamLine(buffer);
         if (parsed) mainWindow?.webContents.send("stream-event", parsed);
