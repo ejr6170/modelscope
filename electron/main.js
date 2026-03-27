@@ -85,7 +85,7 @@ function createWindow() {
   hardwareMonitor.onData((data) => {
     mainWindow?.webContents.send("hardware-metrics", data);
   });
-  hardwareMonitor.start(2500);
+  hardwareMonitor.start(5000);
 
   globalShortcut.register("CommandOrControl+K", () => {
     if (!mainWindow) return;
@@ -239,9 +239,15 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL("http://localhost:3777");
-    mainWindow.webContents.on("did-fail-load", (_e, code, desc) => {
-      setTimeout(() => mainWindow.loadURL("http://localhost:3777"), 2000);
+    const tryLoad = () => {
+      if (!mainWindow) return;
+      mainWindow.loadURL("http://localhost:3777").catch(() => {
+        setTimeout(tryLoad, 1500);
+      });
+    };
+    tryLoad();
+    mainWindow.webContents.on("did-fail-load", () => {
+      setTimeout(tryLoad, 1500);
     });
   } else {
     const appPath = app.getAppPath();

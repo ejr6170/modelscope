@@ -5,6 +5,7 @@ import path from "path";
 import os from "os";
 import { findNewestSession, findSubagentLogs, parseSubagentSummary, parseLine, extractEvent } from "./src/parser.js";
 import { getUsage, updateUsage, checkLogEntryForUsage } from "./src/usage-cache.js";
+import { getCursorMetrics } from "./src/cursor-metrics.js";
 
 
 const PORT = 3778;
@@ -36,6 +37,8 @@ function createFreshMetrics() {
     modelTokens: {},
     recentResponses: [],
     totalCodeTokens: 0,
+    costHistory: [],
+    rateLimitHistory: [],
   };
 }
 
@@ -281,6 +284,17 @@ function processEvent(projectId, event) {
   if (!event) return;
   const projectState = getOrCreateProjectState(projectId);
 
+  if (event.type === "rateLimit") {
+    projectState.metrics.rateLimitHistory.push({
+      timestamp: new Date().toISOString(),
+      status: event.status || "unknown",
+      resetsAt: event.resetsAt || "",
+    });
+    if (projectState.metrics.rateLimitHistory.length > 50) projectState.metrics.rateLimitHistory.shift();
+    emitToProjectViewers(projectId, "metrics", buildMetricsPayload(projectId));
+    return;
+  }
+
   if (event.role === "assistant") {
     if (event.tokens) {
       projectState.metrics.tokens.input += event.tokens.input;
@@ -296,6 +310,18 @@ function processEvent(projectId, event) {
     if (event.tokens?.output > 0) {
       projectState.metrics.recentResponses.push({ outputTokens: event.tokens.output, timestamp: event.timestamp || new Date().toISOString() });
       if (projectState.metrics.recentResponses.length > 5) projectState.metrics.recentResponses.shift();
+    }
+    if (event.tokens && event.costUSD) {
+      projectState.metrics.costHistory.push({
+        timestamp: event.timestamp || new Date().toISOString(),
+        inputTokens: event.tokens.input,
+        outputTokens: event.tokens.output,
+        cacheRead: event.tokens.cacheRead,
+        cacheWrite: event.tokens.cacheWrite,
+        cost: event.costUSD,
+        model: event.model || "",
+      });
+      if (projectState.metrics.costHistory.length > 200) projectState.metrics.costHistory.shift();
     }
     if (event.toolUses) {
       projectState.metrics.toolCalls += event.toolUses.length;
@@ -427,6 +453,9 @@ function buildMetricsPayload(projectId) {
     usage: getUsage(),
     rollingVelocity: calcRollingVelocity(projectState),
     efficiencyRatio: projectState.metrics.tokens.output > 0 ? Math.round((projectState.metrics.totalCodeTokens / projectState.metrics.tokens.output) * 100) : 0,
+    costHistory: projectState.metrics.costHistory,
+    rateLimitHistory: projectState.metrics.rateLimitHistory,
+    cursorMetrics: getCursorMetrics(),
   };
 }
 
@@ -516,6 +545,21 @@ function checkSubagentLogs(projectId) {
         event.isSubagentEvent = true;
         event.agentId = sa.agentId;
         event.toolUseId = agentIdMap.get(sa.agentId) || sa.agentId;
+
+        if (event.role === "assistant" && event.toolUses) {
+          for (const tu of event.toolUses) {
+            if (tu.tool === "Edit" && tu.input?.file) {
+              const info = resolveEditLines(projectId, tu.id, tu.input.file, tu.input.oldString, tu.input.newString, tu.input.replaceAll);
+              if (info) tu.lineInfo = info;
+            }
+            if (tu.tool === "Write" && tu.input?.content) {
+              const lineCount = tu.input.content.split("\n").length;
+              tu.lineInfo = { startLine: 1, endLine: lineCount, hunks: [{ startLine: 1, lineCount }] };
+              try { tu.isNewFile = !fs.existsSync(tu.input.file); } catch { tu.isNewFile = false; }
+            }
+          }
+        }
+
         emitToProjectViewers(projectId, "subagent_event", event);
       }
     }
@@ -690,11 +734,33 @@ io.on("connection", (socket) => {
     }
   });
 
+  socket.on("rate_limit", (data) => {
+    const projectId = socketActiveProject.get(socket.id);
+    if (!projectId) return;
+    const projectState = getOrCreateProjectState(projectId);
+    projectState.metrics.rateLimitHistory.push({
+      timestamp: new Date().toISOString(),
+      status: data.status || "unknown",
+      resetsAt: data.resetsAt || "",
+    });
+    if (projectState.metrics.rateLimitHistory.length > 50) projectState.metrics.rateLimitHistory.shift();
+    emitToProjectViewers(projectId, "metrics", buildMetricsPayload(projectId));
+  });
+
   socket.on("disconnect", () => {
     console.log(`[modelscope] Client disconnected: ${socket.id}`);
     socketActiveProject.delete(socket.id);
   });
 });
+
+let projectListTimer = null;
+function debouncedBroadcastProjectList() {
+  if (projectListTimer) clearTimeout(projectListTimer);
+  projectListTimer = setTimeout(() => {
+    io.emit("projects_list", scanAllProjects());
+    projectListTimer = null;
+  }, 500);
+}
 
 async function startWatching() {
   const projects = scanAllProjects();
@@ -717,7 +783,7 @@ async function startWatching() {
       if (projectId) {
         checkProjectSession(projectId);
         globalActiveProjectId = projectId;
-        io.emit("projects_list", scanAllProjects());
+        debouncedBroadcastProjectList();
       }
     });
 
@@ -728,14 +794,14 @@ async function startWatching() {
       if (projectId) {
         checkProjectSession(projectId);
         globalActiveProjectId = projectId;
-        io.emit("projects_list", scanAllProjects());
+        debouncedBroadcastProjectList();
       }
     });
 
     console.log(`[modelscope] Watching all projects with chokidar (depth: 3)`);
   } catch {
     console.log(`[modelscope] Polling all projects every 500ms`);
-    setInterval(checkAllProjects, 500);
+    setInterval(checkAllProjects, 2000);
   }
 }
 

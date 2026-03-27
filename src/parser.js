@@ -3,10 +3,10 @@ import path from "path";
 import os from "os";
 
 const PRICING = {
-  "claude-opus-4-6":           { input: 15 / 1e6, output: 75 / 1e6, cacheRead: 1.5 / 1e6, cacheWrite: 18.75 / 1e6 },
+  "claude-opus-4-6":           { input: 5 / 1e6, output: 25 / 1e6, cacheRead: 0.5 / 1e6, cacheWrite: 6.25 / 1e6 },
   "claude-opus-4-5-20251101":  { input: 15 / 1e6, output: 75 / 1e6, cacheRead: 1.5 / 1e6, cacheWrite: 18.75 / 1e6 },
   "claude-sonnet-4-6":         { input: 3 / 1e6,  output: 15 / 1e6, cacheRead: 0.3 / 1e6, cacheWrite: 3.75 / 1e6 },
-  "claude-haiku-4-5-20251001": { input: 0.8 / 1e6, output: 4 / 1e6, cacheRead: 0.08 / 1e6, cacheWrite: 1 / 1e6 },
+  "claude-haiku-4-5-20251001": { input: 1 / 1e6, output: 5 / 1e6, cacheRead: 0.1 / 1e6, cacheWrite: 1.25 / 1e6 },
 };
 const DEFAULT_PRICING = PRICING["claude-opus-4-6"];
 
@@ -89,6 +89,15 @@ export function extractEvent(entry) {
 
   if (entry.type === "system") {
     return { ...base, subtype: entry.subtype, content: entry.content };
+  }
+
+  if (entry.type === "rate_limit_event" && entry.rate_limit_info) {
+    return {
+      ...base,
+      type: "rateLimit",
+      status: entry.rate_limit_info.status || "unknown",
+      resetsAt: entry.rate_limit_info.resetsAt || "",
+    };
   }
 
   if (entry.type === "user" && entry.message?.role === "user") {
