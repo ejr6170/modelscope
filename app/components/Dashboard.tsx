@@ -35,6 +35,18 @@ interface SessionEvent {
 interface ModelBreakdown { model: string; tokens: number; pct: number; }
 interface PlanInfo { subscriptionType: string; rateLimitTier: string; }
 
+interface CursorMetrics {
+  totalHashes: number;
+  composerHashes: number;
+  humanHashes: number;
+  aiPercentage: number;
+  activeModel: string;
+  trackingSince: string | null;
+  dailyActivity: { date: string; composer: number; human: number }[];
+  topFiles: { fileName: string; fileExtension: string; count: number }[];
+  commits: { commitHash: string; commitMessage: string; commitDate: string; linesAdded: number; linesDeleted: number; composerLinesAdded: number; humanLinesAdded: number; aiPercentage: number }[];
+}
+
 interface Metrics {
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   cost: number; turns: number; toolCalls: number;
@@ -47,6 +59,7 @@ interface Metrics {
   efficiencyRatio?: number;
   costHistory?: { timestamp: string; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cost: number; model: string }[];
   rateLimitHistory?: { timestamp: string; status: string; resetsAt: string }[];
+  cursorMetrics?: CursorMetrics | null;
 }
 
 interface SessionInfo { sessionId: string; project: string; startedAt: string; }
