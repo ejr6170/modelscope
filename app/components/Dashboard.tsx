@@ -4,95 +4,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { io, Socket } from "socket.io-client";
-
-interface ToolInput {
-  command?: string; description?: string; file?: string; content?: string;
-  lines?: number; oldString?: string; newString?: string; replaceAll?: boolean;
-  pattern?: string; path?: string; outputMode?: string; type?: string; query?: string;
-  background?: boolean;
-  [key: string]: unknown;
-}
-
-interface LineHunk { startLine: number; lineCount: number; }
-interface LineInfo { startLine: number; endLine: number; hunks: LineHunk[]; }
-
-interface ToolUse {
-  tool: string; id: string; input: ToolInput | null;
-  callerType?: string; readSource?: string;
-  isSubagent?: boolean; subagentType?: string; subagentDesc?: string; subagentBackground?: boolean;
-  lineInfo?: LineInfo;
-}
-
-interface SessionEvent {
-  uuid: string; timestamp: string; type: string; role?: string; model?: string;
-  thinking?: string[]; text?: string[]; toolUses?: ToolUse[];
-  tokens?: { input: number; output: number; cacheRead: number; cacheWrite: number };
-  costUSD?: number; stopReason?: string | null;
-  toolResults?: { toolUseId: string; content: string; isError: boolean }[];
-  isSidechain?: boolean; agentId?: string; isSubagentEvent?: boolean;
-}
-
-interface ModelBreakdown { model: string; tokens: number; pct: number; }
-interface PlanInfo { subscriptionType: string; rateLimitTier: string; }
-
-interface CursorMetrics {
-  totalHashes: number;
-  composerHashes: number;
-  humanHashes: number;
-  aiPercentage: number;
-  activeModel: string;
-  trackingSince: string | null;
-  dailyActivity: { date: string; composer: number; human: number }[];
-  topFiles: { fileName: string; fileExtension: string; count: number }[];
-  commits: { commitHash: string; commitMessage: string; commitDate: string; linesAdded: number; linesDeleted: number; composerLinesAdded: number; humanLinesAdded: number; aiPercentage: number }[];
-}
-
-interface Metrics {
-  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
-  cost: number; turns: number; toolCalls: number;
-  elapsed: number; velocity: number; startTime: number;
-  hourlyTurns: number; topFiles: { file: string; count: number }[];
-  errorCount: number; activeSubagents: { id: string; type: string; desc: string; startTime: string }[];
-  plan?: PlanInfo; modelBreakdown?: ModelBreakdown[];
-  usage?: { sessionPercent: number | null; weeklyPercent: number | null; sonnetPercent: number | null; resetAt: string | null; resetLabel: string | null; lastUpdated: string | null; source: string };
-  rollingVelocity?: number;
-  efficiencyRatio?: number;
-  costHistory?: { timestamp: string; inputTokens: number; outputTokens: number; cacheRead: number; cacheWrite: number; cost: number; model: string }[];
-  rateLimitHistory?: { timestamp: string; status: string; resetsAt: string }[];
-  cursorMetrics?: CursorMetrics | null;
-}
-
-interface SessionInfo { sessionId: string; project: string; startedAt: string; }
-interface PinnedError { id: string; timestamp: string; content: string; toolUseId: string; }
-
-interface ProjectInfo {
-  id: string;
-  name: string;
-  lastActive: string | null;
-  lastActiveMtime: number;
-  isLive: boolean;
-  sessionCount: number;
-}
-
-type CardKind = "thought" | "reply" | "code" | "tool" | "user" | "error" | "subagent" | "read";
-
-interface FeedCard {
-  id: string; kind: CardKind; timestamp: string; text?: string;
-  filename?: string; code?: string; diff?: { removed: string; added: string };
-  toolName?: string; toolSummary?: string; model?: string;
-  subagentType?: string; subagentDesc?: string; isNested?: boolean; agentId?: string;
-  readSource?: string;
-  isError?: boolean;
-  fullPath?: string;
-  lineInfo?: LineInfo;
-  isNewFile?: boolean;
-  turnTokens?: number;
-  turnCost?: number;
-  turnInputTokens?: number;
-  turnOutputTokens?: number;
-  rationale?: string;
-  subagentMission?: string;
-}
+import type { ToolInput, LineHunk, LineInfo, ToolUse, SessionEvent, ModelBreakdown, PlanInfo, CursorMetrics, Metrics, SessionInfo, PinnedError, ProjectInfo, CardKind, FeedCard, DetectedConcept, HudSettings, AgentNode, HwMetrics } from "./types";
+import { ringColor, modelColor, formatDuration, shortPath, ProgressRing, ProgressBar, SideMetric, CpuIcon, ZapIcon, DollarIcon, ClockIcon, LayersIcon, WrenchIcon } from "./shared";
 
 function eventToCards(event: SessionEvent): FeedCard[] {
   const cards: FeedCard[] = [];
@@ -144,33 +57,6 @@ function eventToCards(event: SessionEvent): FeedCard[] {
   return cards;
 }
 
-function ringColor(pct: number): string {
-  if (pct >= 80) return "rgb(248, 113, 113)";
-  if (pct >= 60) return "rgb(251, 191, 36)";
-  return "rgb(52, 211, 153)";
-}
-
-function modelColor(model: string): string {
-  if (model.includes("opus")) return "rgb(129, 140, 248)";
-  if (model.includes("haiku")) return "rgb(251, 191, 36)";
-  return "rgb(34, 211, 238)";
-}
-
-function ProgressRing({ pct, size = 48, stroke = 4 }: { pct: number; size?: number; stroke?: number }) {
-  const r = (size - stroke) / 2;
-  const circ = 2 * Math.PI * r;
-  const offset = circ - (Math.min(pct, 100) / 100) * circ;
-  const color = ringColor(pct);
-  return (
-    <svg width={size} height={size} className="transform -rotate-90">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke} />
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
-        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-500" />
-    </svg>
-  );
-}
-
-function shortPath(f?: string): string { if (!f) return ""; const p = f.replace(/\\/g, "/").split("/"); return p.length > 2 ? p.slice(-2).join("/") : f; }
 function formatToolSummary(toolName: string, input: ToolInput): string {
   switch (toolName) { case "Glob": return input.pattern || ""; case "Grep": return `/${input.pattern || ""}/`; case "Agent": return input.description || ""; case "ToolSearch": return String(input.query || ""); default: return Object.values(input).filter(v => typeof v === "string").join(" ").slice(0, 80); }
 }
@@ -357,8 +243,6 @@ const CostBadge = React.memo(function CostBadge({ tokens, cost, inputTokens, out
     </span>
   );
 });
-
-interface DetectedConcept { key: string; title: string; def: string; firstCardId: string; }
 
 function detectConceptsFromCards(cards: FeedCard[]): DetectedConcept[] {
   const found = new Map<string, string>();
@@ -1974,44 +1858,6 @@ const Sidebar = React.memo(function Sidebar({ metrics, model, session, onReset, 
   );
 });
 
-function ProgressBar({ value, detail }: { value: number; detail: string }) {
-  const color = value >= 80 ? "from-amber-500 to-orange-500" : value >= 50 ? "from-blue-400 to-cyan-400" : "from-blue-500 to-cyan-500";
-  const glow = value >= 80 ? "shadow-[0_0_8px_rgba(251,191,36,0.4)]" : "shadow-[0_0_6px_rgba(59,130,246,0.3)]";
-  return (<div>
-    <div className="h-[5px] rounded-full bg-white/[0.06] overflow-hidden">
-      <motion.div className={`h-full rounded-full bg-gradient-to-r ${color} ${glow}`} initial={{ width: 0 }} animate={{ width: `${value}%` }} transition={{ duration: 0.6, ease: "easeOut" }} />
-    </div>
-    <div className="flex items-center justify-end mt-0.5">
-      <span className="text-[8px] font-mono text-txt-tertiary tabular-nums">{detail}</span>
-    </div>
-  </div>);
-}
-
-function SideMetric({ icon, label, value, color, pulse }: { icon: React.ReactNode; label: string; value: string; color: string; pulse?: boolean }) {
-  return (<div className={`flex items-center gap-2.5 ${pulse ? "animate-pulse" : ""}`}><span className={`${color} opacity-50 shrink-0`}>{icon}</span><div className="flex-1 min-w-0"><span className="text-[8px] font-sans font-semibold tracking-[0.18em] uppercase text-txt-tertiary block leading-none">{label}</span><span className={`text-[12px] font-mono font-bold leading-tight tabular-nums ${color} block mt-0.5`}>{value}</span></div></div>);
-}
-
-function CpuIcon() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" /><line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" /><line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" /><line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" /></svg>; }
-function ZapIcon() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>; }
-function DollarIcon() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>; }
-function ClockIcon() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>; }
-function LayersIcon() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></svg>; }
-function WrenchIcon() { return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></svg>; }
-
-interface HudSettings {
-  glassOpacity: number;
-  blurIntensity: "none" | "low" | "high";
-  sidebarShadows: boolean;
-  hotspotsEnabled: boolean;
-  rationaleAutoExpand: boolean;
-  tooltipDelay: number;
-  sessionBudget: number;
-  inputRate: number;
-  outputRate: number;
-  alwaysOnTop: boolean;
-  simpleHotspots: boolean;
-  autoSnipeLargeFiles: boolean;
-}
 
 const DEFAULT_SETTINGS: HudSettings = {
   glassOpacity: 0.82,
@@ -2583,7 +2429,7 @@ const StatusBar = React.memo(function StatusBar({ connected, onOpenSettings, act
   );
 });
 
-function formatDuration(ms: number): string { const s = Math.floor(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60); if (h > 0) return `${h}h${String(m % 60).padStart(2, "0")}m`; if (m > 0) return `${m}m${String(s % 60).padStart(2, "0")}s`; return `${s}s`; }
+
 
 const MAX_CARDS = 60;
 function createDefaultMetrics(): Metrics {
@@ -2655,23 +2501,7 @@ function useAgentState(socketRef: React.RefObject<Socket | null>) {
   return { completedAgents, agentEvents, setAgentEvents, resetAgentState };
 }
 
-interface AgentNode {
-  id: string;
-  type: string;
-  desc: string;
-  startTime: string;
-  background?: boolean;
-  status: "active" | "done" | "failed";
-  result?: string;
-  isError?: boolean;
-}
 
-interface HwMetrics {
-  cpu: { percent: number };
-  memory: { usedGB: number; totalGB: number; percent: number };
-  gpu: { available: boolean; name?: string; utilPercent?: number; vramUsedMB?: number; vramTotalMB?: number; tempC?: number } | null;
-  processes: { pid: number; name: string; cpuPercent: number; memoryMB: number; parentPid: number }[];
-}
 
 export default function Dashboard() {
   const [connected, setConnected] = useState(false);
