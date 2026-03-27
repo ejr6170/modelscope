@@ -22,6 +22,8 @@ Three phases, each producing a working app. No phase depends on a later phase.
 
 Change `<AnimatePresence mode="wait">` to `<AnimatePresence mode="popLayout">`. This allows the incoming view to render immediately while the outgoing view animates out, eliminating the 250ms sequential blocking delay.
 
+**Implementation note:** With `popLayout`, the exiting and entering views briefly coexist in layout. Since each view uses `className="flex-1"`, two flex-1 children would split the space. Add `style={{ position: "absolute", inset: 0 }}` to the `exit` animation so the outgoing view overlays rather than sharing flex space.
+
 #### 1b. Memoize View Components
 
 Wrap these components with `React.memo()`:
@@ -34,6 +36,7 @@ Wrap these components with `React.memo()`:
 | `AgentsView` | ~1097 | Re-renders on metrics ticks |
 | `MonitorView` | ~2387 | Re-renders on card additions |
 | `CardRouter` | ~926 | Rendered 60x per feed, re-renders on any parent state change |
+| `CostBadge` | ~245 | Rendered inside CardRouter 60x, each spins up a rAF animation loop |
 | `CommandBar` | ~2159 | Re-renders on metrics/cards changes |
 
 #### 1c. Split Hot State Into Custom Hooks
@@ -46,7 +49,7 @@ This prevents hardware ticks (every 5s) and agent events from re-rendering the f
 
 #### 1d. Memoize Expensive Computations
 
-- **Inline handlers → useCallback:** `onOpenSettings`, `onReset`, `onRateLimit` currently create new function references on every render, defeating React.memo on children. Wrap with `useCallback`.
+- **Inline handlers → useCallback:** Extract the inline arrow functions at lines ~2739 (`() => setSettingsOpen(true)`), ~2805 (`() => socketRef.current?.emit("reset_stats")`), and ~2809 (`(data) => socketRef.current?.emit("rate_limit", data)`) into named `useCallback` variables above the return statement. These create new function references on every render, defeating React.memo on `StatusBar`, `Sidebar`, and `CommandBar`.
 - **Chart calculations → useMemo:** `maxCost`, burn rate, sparkline slicing in FlowView/MonitorView. Currently recomputed on every render.
 - **highlightSyntax regex → useMemo or module-level:** The `conceptKeys` filtering and `conceptRe` RegExp construction runs once per CodeLines/DiffLines render (up to 60x per feed update).
 
@@ -80,17 +83,17 @@ Pattern: each component that uses `setTimeout` gets a `useEffect(() => () => cle
 - **`completedAgents`** — Cap at 50 entries. When adding, slice to keep most recent 50.
 - **`agentEvents`** — When `subagent_end` fires, delete the corresponding key from `agentEvents`. Currently keys accumulate forever.
 
-#### 2c. Fix Socket.IO Listener Thrashing
+#### 2c. Clean Up Socket.IO Effect Dependencies
 
-**Problem:** The socket `useEffect` (line 2646) has `[scrollBottom]` as its dependency. Every time `scrollBottom` callback identity changes, all 10+ socket listeners are torn down and re-attached.
+**Problem:** The socket `useEffect` (line 2646) has `[scrollBottom]` as its dependency. While `scrollBottom` currently has a stable identity (`useCallback` with `[]` deps), this is fragile — any future change to its dependencies would cause all 10+ socket listeners to tear down and re-attach.
 
-**Fix:** Use a ref for `scrollBottom`:
+**Fix:** Use a ref for `scrollBottom` and change the effect dependency to `[]` (mount-only):
 ```javascript
 const scrollBottomRef = useRef(scrollBottom);
 scrollBottomRef.current = scrollBottom;
 ```
 
-Change socket `useEffect` dependency to `[]` (mount-only). Inside handlers, call `scrollBottomRef.current()` instead of `scrollBottom()`. This prevents listener re-attachment entirely.
+Inside handlers, call `scrollBottomRef.current()` instead of `scrollBottom()`. This is a hygiene fix that makes the socket lifecycle explicit and resilient to future changes.
 
 #### 2d. Fix Auto-Scroll Snap on Charts
 
