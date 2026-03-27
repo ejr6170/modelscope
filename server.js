@@ -299,11 +299,12 @@ function processEvent(projectId, event) {
     }
     if (event.toolUses) {
       projectState.metrics.toolCalls += event.toolUses.length;
+      let hasCodeEdit = false;
       for (const tu of event.toolUses) {
         if ((tu.tool === "Write" || tu.tool === "Edit") && tu.input?.file) {
           const short = shortPath(tu.input.file);
           projectState.metrics.fileEdits[short] = (projectState.metrics.fileEdits[short] || 0) + 1;
-          projectState.metrics.totalCodeTokens += (event.tokens?.output || 0);
+          hasCodeEdit = true;
         }
         if (tu.tool === "Edit" && tu.input?.file) {
           const info = resolveEditLines(projectId, tu.id, tu.input.file, tu.input.oldString, tu.input.newString, tu.input.replaceAll);
@@ -327,6 +328,9 @@ function processEvent(projectId, event) {
           });
           emitToProjectViewers(projectId, "subagent_start", { id: tu.id, ...projectState.activeSubagents.get(tu.id) });
         }
+      }
+      if (hasCodeEdit) {
+        projectState.metrics.totalCodeTokens += (event.tokens?.output || 0);
       }
     }
   }
