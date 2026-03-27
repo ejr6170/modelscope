@@ -184,10 +184,30 @@ function createWindow() {
     activeProc = proc;
     if (hardwareMonitor) hardwareMonitor.setRootPid(proc.pid);
 
-    proc.stdin.write(text);
-    proc.stdin.end();
-
+    let closed = false;
     let buffer = "";
+    let stderrBuffer = "";
+
+    const emitStreamError = (message, details) => {
+      const result = details ? `${message}\n${details}` : message;
+      mainWindow?.webContents.send("stream-event", {
+        type: "result",
+        totalCost: 0,
+        durationMs: 0,
+        isError: true,
+        result,
+        usage: {},
+      });
+    };
+
+    const finish = (code) => {
+      if (closed) return;
+      closed = true;
+      if (hardwareMonitor) hardwareMonitor.setRootPid(null);
+      mainWindow?.webContents.send("stream-event", { type: "done", exitCode: code });
+      activeProc = null;
+      if (code === 0) isFirstPrompt = false;
+    };
 
     proc.stdout.on("data", (chunk) => {
       buffer += chunk.toString();
@@ -202,17 +222,43 @@ function createWindow() {
       }
     });
 
-    proc.stderr.on("data", () => {});
+    proc.stderr.on("data", (chunk) => {
+      stderrBuffer += chunk.toString();
+      if (stderrBuffer.length > 4000) stderrBuffer = stderrBuffer.slice(-4000);
+    });
+
+    proc.on("error", (err) => {
+      emitStreamError("Failed to start Claude CLI.", err.message || "");
+      finish(-1);
+    });
+
+    proc.stdin.on("error", (err) => {
+      emitStreamError("Failed to send prompt to Claude CLI.", err.message || "");
+      finish(-1);
+    });
+
+    try {
+      proc.stdin.write(text);
+      proc.stdin.end();
+    } catch (err) {
+      emitStreamError("Failed to send prompt to Claude CLI.", err instanceof Error ? err.message : String(err));
+      finish(-1);
+      return;
+    }
 
     proc.on("close", (code) => {
+      if (closed) return;
       if (buffer.trim()) {
         const parsed = parseStreamLine(buffer);
         if (parsed) mainWindow?.webContents.send("stream-event", parsed);
       }
-      if (hardwareMonitor) hardwareMonitor.setRootPid(null);
-      mainWindow?.webContents.send("stream-event", { type: "done", exitCode: code });
-      activeProc = null;
-      isFirstPrompt = false;
+
+      if (code !== 0) {
+        const stderrPreview = stderrBuffer.trim().split("\n").slice(-4).join("\n");
+        emitStreamError(`Claude CLI exited with code ${code}.`, stderrPreview || "No stderr output.");
+      }
+
+      finish(code ?? -1);
     });
   });
 
