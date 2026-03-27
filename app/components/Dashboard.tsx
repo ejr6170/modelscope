@@ -2309,7 +2309,7 @@ function StatusBar({ connected, onOpenSettings, activeView, onViewChange, update
           {[
             { id: "feed", label: "FEED", enabled: true },
             { id: "agents", label: "AGENTS", enabled: true },
-            { id: "flow", label: "FLOW", enabled: false },
+            { id: "flow", label: "FLOW", enabled: true },
             { id: "monitor", label: "MONITOR", enabled: true },
           ].map(btn => (
             <button key={btn.id} onClick={() => btn.enabled && onViewChange(btn.id)}
@@ -2581,6 +2581,11 @@ export default function Dashboard() {
                   session={session}
                   metrics={metrics}
                 />
+              </motion.div>
+            )}
+            {activeView === "flow" && (
+              <motion.div key="flow-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }} className="flex-1 min-h-0">
+                <FlowView metrics={metrics} />
               </motion.div>
             )}
             {activeView === "monitor" && (
