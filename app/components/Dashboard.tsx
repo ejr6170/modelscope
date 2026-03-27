@@ -2577,6 +2577,51 @@ function useHardwareMetrics() {
   return { hardwareMetrics, hardwareHistory };
 }
 
+function useAgentState(socketRef: React.RefObject<Socket | null>) {
+  const [completedAgents, setCompletedAgents] = useState<AgentNode[]>([]);
+  const [agentEvents, setAgentEvents] = useState<Record<string, SessionEvent[]>>({});
+
+  useEffect(() => {
+    const s = socketRef.current;
+    if (!s) return;
+
+    const onSubagentEvent = (ev: SessionEvent & { toolUseId?: string; agentId?: string }) => {
+      const agentKey = ev.toolUseId || ev.agentId || "";
+      if (agentKey) {
+        setAgentEvents(prev => {
+          const events = prev[agentKey] || [];
+          const updated = [...events, ev as SessionEvent];
+          return { ...prev, [agentKey]: updated.length > 50 ? updated.slice(-50) : updated };
+        });
+      }
+    };
+
+    const onSubagentEnd = (data: { id: string; type?: string; desc?: string; startTime?: string; result?: string; isError?: boolean }) => {
+      setCompletedAgents(prev => {
+        const next = [...prev, {
+          id: data.id, type: data.type || "", desc: data.desc || "",
+          startTime: data.startTime || new Date().toISOString(),
+          status: (data.isError ? "failed" : "done") as "active" | "done" | "failed",
+          result: data.result, isError: data.isError,
+        }];
+        return next.length > 50 ? next.slice(-50) : next;
+      });
+      setAgentEvents(prev => { const copy = { ...prev }; delete copy[data.id]; return copy; });
+    };
+
+    s.on("subagent_event", onSubagentEvent);
+    s.on("subagent_end", onSubagentEnd);
+    return () => { s.off("subagent_event", onSubagentEvent); s.off("subagent_end", onSubagentEnd); };
+  }, [socketRef]);
+
+  const resetAgentState = useCallback(() => {
+    setCompletedAgents([]);
+    setAgentEvents({});
+  }, []);
+
+  return { completedAgents, agentEvents, setAgentEvents, resetAgentState };
+}
+
 interface AgentNode {
   id: string;
   type: string;
@@ -2610,12 +2655,11 @@ export default function Dashboard() {
   const [updateStatus, setUpdateStatus] = useState("idle");
   const [fileTargets, setFileTargets] = useState<Record<string, "neutral" | "snipe" | "focus">>({});
   const { hardwareMetrics, hardwareHistory } = useHardwareMetrics();
-  const [completedAgents, setCompletedAgents] = useState<AgentNode[]>([]);
-  const [agentEvents, setAgentEvents] = useState<Record<string, SessionEvent[]>>({});
-  const [settings, updateSettings, resetSettings] = useSettings();
   const feedRef = useRef<HTMLDivElement>(null);
   const autoScroll = useRef(true);
   const socketRef = useRef<Socket | null>(null);
+  const { completedAgents, agentEvents, setAgentEvents, resetAgentState } = useAgentState(socketRef);
+  const [settings, updateSettings, resetSettings] = useSettings();
 
   const overBudget = settings.sessionBudget > 0 && metrics.cost > settings.sessionBudget;
 
@@ -2649,8 +2693,7 @@ export default function Dashboard() {
     setMetrics(createDefaultMetrics());
     setPinnedErrors([]);
     setSession(null);
-    setCompletedAgents([]);
-    setAgentEvents({});
+    resetAgentState();
     socketRef.current?.emit("switch_project", projectId);
   }, []);
 
@@ -2715,26 +2758,6 @@ export default function Dashboard() {
       const newCards = eventToCards(ev); if (!newCards.length) return;
       setCards(p => { const combined = [...p, ...newCards]; return combined.length > MAX_CARDS ? combined.slice(-MAX_CARDS) : combined; });
       setTimeout(scrollBottom, 80);
-      const agentKey = ev.toolUseId || ev.agentId || "";
-      if (agentKey) {
-        setAgentEvents(prev => {
-          const events = prev[agentKey] || [];
-          const updated = [...events, ev as SessionEvent];
-          return { ...prev, [agentKey]: updated.length > 50 ? updated.slice(-50) : updated };
-        });
-      }
-    });
-
-    s.on("subagent_end", (data: { id: string; type?: string; desc?: string; startTime?: string; result?: string; isError?: boolean }) => {
-      setCompletedAgents(prev => [...prev, {
-        id: data.id,
-        type: data.type || "",
-        desc: data.desc || "",
-        startTime: data.startTime || new Date().toISOString(),
-        status: data.isError ? "failed" : "done",
-        result: data.result,
-        isError: data.isError,
-      }]);
     });
 
     s.on("pinned_errors", (errs: PinnedError[]) => setPinnedErrors(errs));
