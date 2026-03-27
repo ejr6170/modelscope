@@ -36,6 +36,8 @@ function createFreshMetrics() {
     modelTokens: {},
     recentResponses: [],
     totalCodeTokens: 0,
+    costHistory: [],
+    rateLimitHistory: [],
   };
 }
 
@@ -281,6 +283,17 @@ function processEvent(projectId, event) {
   if (!event) return;
   const projectState = getOrCreateProjectState(projectId);
 
+  if (event.type === "rateLimit") {
+    projectState.metrics.rateLimitHistory.push({
+      timestamp: new Date().toISOString(),
+      status: event.status,
+      resetsAt: event.resetsAt,
+    });
+    if (projectState.metrics.rateLimitHistory.length > 50) projectState.metrics.rateLimitHistory.shift();
+    emitToProjectViewers(projectId, "metrics", buildMetricsPayload(projectId));
+    return;
+  }
+
   if (event.role === "assistant") {
     if (event.tokens) {
       projectState.metrics.tokens.input += event.tokens.input;
@@ -296,6 +309,18 @@ function processEvent(projectId, event) {
     if (event.tokens?.output > 0) {
       projectState.metrics.recentResponses.push({ outputTokens: event.tokens.output, timestamp: event.timestamp || new Date().toISOString() });
       if (projectState.metrics.recentResponses.length > 5) projectState.metrics.recentResponses.shift();
+    }
+    if (event.tokens && event.costUSD) {
+      projectState.metrics.costHistory.push({
+        timestamp: event.timestamp || new Date().toISOString(),
+        inputTokens: event.tokens.input,
+        outputTokens: event.tokens.output,
+        cacheRead: event.tokens.cacheRead,
+        cacheWrite: event.tokens.cacheWrite,
+        cost: event.costUSD,
+        model: event.model || "",
+      });
+      if (projectState.metrics.costHistory.length > 200) projectState.metrics.costHistory.shift();
     }
     if (event.toolUses) {
       projectState.metrics.toolCalls += event.toolUses.length;
@@ -423,6 +448,8 @@ function buildMetricsPayload(projectId) {
     usage: getUsage(),
     rollingVelocity: calcRollingVelocity(projectState),
     efficiencyRatio: projectState.metrics.tokens.output > 0 ? Math.round((projectState.metrics.totalCodeTokens / projectState.metrics.tokens.output) * 100) : 0,
+    costHistory: projectState.metrics.costHistory,
+    rateLimitHistory: projectState.metrics.rateLimitHistory,
   };
 }
 
@@ -699,6 +726,19 @@ io.on("connection", (socket) => {
       emitToProjectViewers(activeProj, "metrics", buildMetricsPayload(activeProj));
       console.log(`[modelscope] Stats reset for ${activeProj}`);
     }
+  });
+
+  socket.on("rate_limit", (data) => {
+    const projectId = socketActiveProject.get(socket.id);
+    if (!projectId) return;
+    const projectState = getOrCreateProjectState(projectId);
+    projectState.metrics.rateLimitHistory.push({
+      timestamp: new Date().toISOString(),
+      status: data.status || "unknown",
+      resetsAt: data.resetsAt || "",
+    });
+    if (projectState.metrics.rateLimitHistory.length > 50) projectState.metrics.rateLimitHistory.shift();
+    emitToProjectViewers(projectId, "metrics", buildMetricsPayload(projectId));
   });
 
   socket.on("disconnect", () => {
