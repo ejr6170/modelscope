@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { io, Socket } from "socket.io-client";
@@ -298,8 +298,7 @@ function highlightSyntax(code: string, hotspots = false): string {
 const cardMotion = { initial: { opacity: 0, y: 14, scale: 0.97 }, animate: { opacity: 1, y: 0, scale: 1 }, exit: { opacity: 0, y: -8, scale: 0.98 } };
 const cardTr = { duration: 0.3, ease: [0.16, 1, 0.3, 1] as const };
 
-function CostBadge({ tokens, cost, inputTokens, outputTokens }: { tokens?: number; cost?: number; inputTokens?: number; outputTokens?: number }) {
-  if (!tokens && !cost) return null;
+const CostBadge = React.memo(function CostBadge({ tokens, cost, inputTokens, outputTokens }: { tokens?: number; cost?: number; inputTokens?: number; outputTokens?: number }) {
   const [showBreakdown, setShowBreakdown] = useState(false);
 
   const [displayTok, setDisplayTok] = useState(0);
@@ -323,6 +322,8 @@ function CostBadge({ tokens, cost, inputTokens, outputTokens }: { tokens?: numbe
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [targetTok, targetCost]);
+
+  if (!tokens && !cost) return null;
 
   const tokLabel = displayTok >= 1000 ? `${(displayTok / 1000).toFixed(1)}k` : String(displayTok);
   const costLabel = displayCost >= 0.005 ? `$${displayCost.toFixed(3)}` : displayCost > 0 ? `$${displayCost.toFixed(4)}` : "";
@@ -355,7 +356,7 @@ function CostBadge({ tokens, cost, inputTokens, outputTokens }: { tokens?: numbe
       )}
     </span>
   );
-}
+});
 
 interface DetectedConcept { key: string; title: string; def: string; firstCardId: string; }
 
@@ -926,7 +927,7 @@ function ErrorCard({ card }: { card: FeedCard }) {
 function Timestamp({ ts }: { ts: string }) { if (!ts) return null; return <span className="text-[8px] font-mono text-txt-tertiary ml-auto tabular-nums">{new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>; }
 function AgentBadge({ id }: { id: string }) { return <span className="text-[7px] font-mono px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-300/70">{id.slice(0, 7)}</span>; }
 
-function CardRouter({ card, onLearnMore }: { card: FeedCard; onLearnMore?: () => void }) {
+const CardRouter = React.memo(function CardRouter({ card, onLearnMore }: { card: FeedCard; onLearnMore?: () => void }) {
   const inner = (() => {
     switch (card.kind) {
       case "thought": return <ThoughtCard card={card} />;
@@ -941,7 +942,7 @@ function CardRouter({ card, onLearnMore }: { card: FeedCard; onLearnMore?: () =>
     }
   })();
   return <CardWrap card={card}>{inner}</CardWrap>;
-}
+});
 
 function PinnedErrors({ errors, onDismiss }: { errors: PinnedError[]; onDismiss: (id: string) => void }) {
   if (!errors.length) return null;
@@ -1097,7 +1098,7 @@ function AgentChangesView({ events }: { events: SessionEvent[] }) {
   );
 }
 
-function AgentsView({ activeAgents, completedAgents, agentEvents, session, metrics }: {
+const AgentsView = React.memo(function AgentsView({ activeAgents, completedAgents, agentEvents, session, metrics }: {
   activeAgents: { id: string; type?: string; desc?: string; startTime?: string; background?: boolean }[];
   completedAgents: AgentNode[];
   agentEvents: Record<string, SessionEvent[]>;
@@ -1317,9 +1318,9 @@ function AgentsView({ activeAgents, completedAgents, agentEvents, session, metri
       )}
     </div>
   );
-}
+});
 
-function CursorFlowView({ cursorMetrics }: { cursorMetrics: CursorMetrics | null }) {
+const CursorFlowView = React.memo(function CursorFlowView({ cursorMetrics }: { cursorMetrics: CursorMetrics | null }) {
   if (!cursorMetrics) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -1453,9 +1454,9 @@ function CursorFlowView({ cursorMetrics }: { cursorMetrics: CursorMetrics | null
       </div>
     </div>
   );
-}
+});
 
-function ClaudeFlowContent({ metrics }: { metrics: Metrics }) {
+const ClaudeFlowContent = React.memo(function ClaudeFlowContent({ metrics }: { metrics: Metrics }) {
   const usage = metrics.usage;
   const sessionPct = usage?.sessionPercent ?? null;
   const weeklyPct = usage?.weeklyPercent ?? null;
@@ -1712,9 +1713,9 @@ function ClaudeFlowContent({ metrics }: { metrics: Metrics }) {
       </div>
     </div>
   );
-}
+});
 
-function FlowView({ metrics }: { metrics: Metrics }) {
+const FlowView = React.memo(function FlowView({ metrics }: { metrics: Metrics }) {
   const [provider, setProvider] = useState<"claude" | "cursor">("claude");
   return (
     <div className="h-full flex flex-col overflow-y-auto">
@@ -1737,11 +1738,11 @@ function FlowView({ metrics }: { metrics: Metrics }) {
       )}
     </div>
   );
-}
+});
 
 const HOURLY_CAP = 60;
 
-function Sidebar({ metrics, model, session, onReset, fileTargets, onCycleTarget, snipedCount, hardwareMetrics }: { metrics: Metrics; model: string; session: SessionInfo | null; onReset?: () => void; fileTargets?: Record<string, string>; onCycleTarget?: (file: string) => void; snipedCount?: number; hardwareMetrics?: HwMetrics | null }) {
+const Sidebar = React.memo(function Sidebar({ metrics, model, session, onReset, fileTargets, onCycleTarget, snipedCount, hardwareMetrics }: { metrics: Metrics; model: string; session: SessionInfo | null; onReset?: () => void; fileTargets?: Record<string, string>; onCycleTarget?: (file: string) => void; snipedCount?: number; hardwareMetrics?: HwMetrics | null }) {
   const totalTok = metrics.tokens.input + metrics.tokens.output;
   const hourlyPct = Math.min((metrics.hourlyTurns / HOURLY_CAP) * 100, 100);
   const costWarning = metrics.cost >= 5;
@@ -1942,7 +1943,7 @@ function Sidebar({ metrics, model, session, onReset, fileTargets, onCycleTarget,
       )}
     </div>
   );
-}
+});
 
 function ProgressBar({ value, detail }: { value: number; detail: string }) {
   const color = value >= 80 ? "from-amber-500 to-orange-500" : value >= 50 ? "from-blue-400 to-cyan-400" : "from-blue-500 to-cyan-500";
@@ -2159,7 +2160,7 @@ function SettingSlider({ value, min, max, step, label, onChange }: { value: numb
   );
 }
 
-function CommandBar({ onRateLimit }: { onRateLimit?: (data: { status: string; resetsAt: string }) => void }) {
+const CommandBar = React.memo(function CommandBar({ onRateLimit }: { onRateLimit?: (data: { status: string; resetsAt: string }) => void }) {
   const [input, setInput] = useState("");
   const [transcript, setTranscript] = useState("");
   const [status, setStatus] = useState<"none" | "working" | "error">("none");
@@ -2321,7 +2322,7 @@ function CommandBar({ onRateLimit }: { onRateLimit?: (data: { status: string; re
       </div>
     </div>
   );
-}
+});
 
 function MiniSparkline({ data, color, width = 80, height = 20 }: { data: number[]; color: string; width?: number; height?: number }) {
   if (data.length < 2) return null;
@@ -2387,7 +2388,7 @@ function HistoryChart({ history, width = 500, height = 100 }: { history: { cpu: 
   );
 }
 
-function MonitorView({ current, history }: { current: HwMetrics | null; history: HwMetrics[] }) {
+const MonitorView = React.memo(function MonitorView({ current, history }: { current: HwMetrics | null; history: HwMetrics[] }) {
   if (!current) return (
     <div className="flex items-center justify-center h-full">
       <p className="text-[11px] font-sans text-txt-tertiary">Waiting for hardware data...</p>
@@ -2479,9 +2480,9 @@ function MonitorView({ current, history }: { current: HwMetrics | null; history:
       </div>
     </div>
   );
-}
+});
 
-function StatusBar({ connected, onOpenSettings, activeView, onViewChange, updateStatus }: { connected: boolean; onOpenSettings: () => void; activeView: string; onViewChange: (v: string) => void; updateStatus: string }) {
+const StatusBar = React.memo(function StatusBar({ connected, onOpenSettings, activeView, onViewChange, updateStatus }: { connected: boolean; onOpenSettings: () => void; activeView: string; onViewChange: (v: string) => void; updateStatus: string }) {
   const eApi = () => (window as unknown as Record<string, Record<string, (...args: unknown[]) => void>>).electronAPI;
   const winMinimize = () => { eApi()?.minimize(); };
   const winToggleMax = () => { eApi()?.toggleMaximize(); };
@@ -2547,7 +2548,7 @@ function StatusBar({ connected, onOpenSettings, activeView, onViewChange, update
       </div>
     </div>
   );
-}
+});
 
 function formatDuration(ms: number): string { const s = Math.floor(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60); if (h > 0) return `${h}h${String(m % 60).padStart(2, "0")}m`; if (m > 0) return `${m}m${String(s % 60).padStart(2, "0")}s`; return `${s}s`; }
 
