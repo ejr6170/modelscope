@@ -131,6 +131,32 @@ function eventToCards(event: SessionEvent): FeedCard[] {
   return cards;
 }
 
+function ringColor(pct: number): string {
+  if (pct >= 80) return "rgb(248, 113, 113)";
+  if (pct >= 60) return "rgb(251, 191, 36)";
+  return "rgb(52, 211, 153)";
+}
+
+function modelColor(model: string): string {
+  if (model.includes("opus")) return "rgb(129, 140, 248)";
+  if (model.includes("haiku")) return "rgb(251, 191, 36)";
+  return "rgb(34, 211, 238)";
+}
+
+function ProgressRing({ pct, size = 48, stroke = 4 }: { pct: number; size?: number; stroke?: number }) {
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const offset = circ - (Math.min(pct, 100) / 100) * circ;
+  const color = ringColor(pct);
+  return (
+    <svg width={size} height={size} className="transform -rotate-90">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+        strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" className="transition-all duration-500" />
+    </svg>
+  );
+}
+
 function shortPath(f?: string): string { if (!f) return ""; const p = f.replace(/\\/g, "/").split("/"); return p.length > 2 ? p.slice(-2).join("/") : f; }
 function formatToolSummary(toolName: string, input: ToolInput): string {
   switch (toolName) { case "Glob": return input.pattern || ""; case "Grep": return `/${input.pattern || ""}/`; case "Agent": return input.description || ""; case "ToolSearch": return String(input.query || ""); default: return Object.values(input).filter(v => typeof v === "string").join(" ").slice(0, 80); }
@@ -1270,6 +1296,245 @@ function AgentsView({ activeAgents, completedAgents, agentEvents, session, metri
           ) : null}
         </div>
       )}
+    </div>
+  );
+}
+
+function FlowView({ metrics }: { metrics: Metrics }) {
+  const usage = metrics.usage;
+  const sessionPct = usage?.sessionPercent ?? null;
+  const weeklyPct = usage?.weeklyPercent ?? null;
+  const resetLabel = usage?.resetLabel || null;
+  const elapsed = metrics.elapsed || 1;
+  const costPerHour = elapsed > 0 ? (metrics.cost / (elapsed / 3600000)) : 0;
+  const totalIn = metrics.tokens.input + metrics.tokens.cacheRead;
+  const cacheHitPct = totalIn > 0 ? Math.round((metrics.tokens.cacheRead / totalIn) * 100) : 0;
+
+  return (
+    <div className="h-full overflow-y-auto p-4 space-y-4">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="rounded-xl border border-white/[0.06] p-3 flex flex-col" style={{ background: "var(--glass-card)" }}>
+          <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary">Total Cost</span>
+          <span className="text-[18px] font-mono font-bold text-emerald-400 mt-1">${metrics.cost.toFixed(2)}</span>
+          <span className="text-[8px] font-mono text-txt-tertiary mt-0.5">${costPerHour.toFixed(2)}/hr</span>
+        </div>
+        <div className="rounded-xl border border-white/[0.06] p-3 flex flex-col" style={{ background: "var(--glass-card)" }}>
+          <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary">Tokens Used</span>
+          <div className="flex items-baseline gap-1 mt-1">
+            <span className="text-[14px] font-mono font-bold text-indigo-300">{metrics.tokens.input >= 1000 ? `${(metrics.tokens.input / 1000).toFixed(1)}k` : metrics.tokens.input}</span>
+            <span className="text-[9px] font-mono text-txt-tertiary">in</span>
+            <span className="text-[14px] font-mono font-bold text-cyan-300">{metrics.tokens.output >= 1000 ? `${(metrics.tokens.output / 1000).toFixed(1)}k` : metrics.tokens.output}</span>
+            <span className="text-[9px] font-mono text-txt-tertiary">out</span>
+          </div>
+          <span className="text-[8px] font-mono text-txt-tertiary mt-0.5">{cacheHitPct}% cache hit</span>
+        </div>
+        <div className="rounded-xl border border-white/[0.06] p-3 flex flex-col items-center" style={{ background: "var(--glass-card)" }}>
+          <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary mb-1">Session</span>
+          {sessionPct !== null ? (
+            <>
+              <div className="relative">
+                <ProgressRing pct={sessionPct} />
+                <span className="absolute inset-0 flex items-center justify-center text-[11px] font-mono font-bold text-txt-primary">{sessionPct}%</span>
+              </div>
+              {resetLabel && <span className="text-[7px] font-mono text-txt-tertiary mt-1">{resetLabel}</span>}
+            </>
+          ) : (
+            <span className="text-[8px] font-mono text-txt-tertiary italic mt-2">Run /usage to sync</span>
+          )}
+        </div>
+        <div className="rounded-xl border border-white/[0.06] p-3 flex flex-col items-center" style={{ background: "var(--glass-card)" }}>
+          <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary mb-1">Weekly</span>
+          {weeklyPct !== null ? (
+            <>
+              <div className="relative">
+                <ProgressRing pct={weeklyPct} />
+                <span className="absolute inset-0 flex items-center justify-center text-[11px] font-mono font-bold text-txt-primary">{weeklyPct}%</span>
+              </div>
+            </>
+          ) : (
+            <span className="text-[8px] font-mono text-txt-tertiary italic mt-2">Run /usage to sync</span>
+          )}
+        </div>
+      </div>
+
+      {/* Cost Timeline */}
+      {(() => {
+        const history = metrics.costHistory || [];
+        if (history.length === 0) return (
+          <div className="rounded-xl border border-white/[0.06] p-4 flex items-center justify-center" style={{ background: "var(--glass-card)", height: 160 }}>
+            <span className="text-[9px] font-mono text-txt-tertiary">No cost data yet</span>
+          </div>
+        );
+        const maxCost = Math.max(...history.map(h => h.cost), 0.0001);
+        const barW = 8, gap = 2, chartH = 120;
+        const svgW = history.length * (barW + gap);
+        return (
+          <div className="rounded-xl border border-white/[0.06] p-3" style={{ background: "var(--glass-card)" }}>
+            <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary">Cost Per Turn</span>
+            <div className="mt-2 overflow-x-auto" ref={(el) => { if (el) el.scrollLeft = el.scrollWidth; }}>
+              <svg width={svgW} height={chartH} className="block">
+                {history.map((h, i) => {
+                  const barH = Math.max((h.cost / maxCost) * (chartH - 20), 2);
+                  const x = i * (barW + gap);
+                  const y = chartH - barH;
+                  return (
+                    <g key={i}>
+                      <title>{`${h.model}\n$${h.cost.toFixed(4)}\n${h.inputTokens} in / ${h.outputTokens} out\nCache: ${h.cacheRead} read / ${h.cacheWrite} write\n${new Date(h.timestamp).toLocaleTimeString()}`}</title>
+                      <rect x={x} y={y} width={barW} height={barH} rx={2} fill={modelColor(h.model)} opacity={0.8} className="hover:opacity-100 transition-opacity" />
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+            <div className="flex items-center gap-3 mt-2">
+              {[["opus", "rgb(129, 140, 248)"], ["sonnet", "rgb(34, 211, 238)"], ["haiku", "rgb(251, 191, 36)"]].map(([label, color]) => (
+                <div key={label} className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-sm" style={{ background: color }} />
+                  <span className="text-[7px] font-mono text-txt-tertiary">{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Bottom Panels */}
+      <div className="grid grid-cols-2 gap-3">
+        {/* Model Breakdown */}
+        <div className="rounded-xl border border-white/[0.06] p-3" style={{ background: "var(--glass-card)" }}>
+          <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary">Model Breakdown</span>
+          {(() => {
+            const bd = metrics.modelBreakdown || [];
+            if (bd.length === 0) return <span className="text-[8px] font-mono text-txt-tertiary block mt-2">No model data</span>;
+            const total = bd.reduce((s, m) => s + m.tokens, 0);
+            const size = 80, sw = 12, r = (size - sw) / 2, circ = 2 * Math.PI * r;
+            let accumulated = 0;
+            return (
+              <div className="flex items-center gap-4 mt-2">
+                <svg width={size} height={size} className="transform -rotate-90 shrink-0">
+                  <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={sw} />
+                  {bd.map((m, i) => {
+                    const pct = total > 0 ? m.tokens / total : 0;
+                    const dashLen = pct * circ;
+                    const dashOffset = -accumulated * circ;
+                    accumulated += pct;
+                    return <circle key={i} cx={size/2} cy={size/2} r={r} fill="none" stroke={modelColor(m.model)} strokeWidth={sw}
+                      strokeDasharray={`${dashLen} ${circ - dashLen}`} strokeDashoffset={dashOffset} />;
+                  })}
+                  <text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="central" className="fill-txt-primary text-[10px] font-mono font-bold" transform={`rotate(90 ${size/2} ${size/2})`}>
+                    {total >= 1000 ? `${(total/1000).toFixed(0)}k` : total}
+                  </text>
+                </svg>
+                <div className="space-y-1.5 flex-1 min-w-0">
+                  {bd.map(m => (
+                    <div key={m.model} className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: modelColor(m.model) }} />
+                      <span className="text-[8px] font-mono text-txt-secondary truncate flex-1">{m.model}</span>
+                      <span className="text-[8px] font-mono text-txt-tertiary tabular-nums">{m.tokens >= 1000 ? `${(m.tokens/1000).toFixed(1)}k` : m.tokens}</span>
+                      <span className="text-[8px] font-mono text-txt-tertiary tabular-nums">{m.pct}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Rate Limit Status */}
+        <div className="rounded-xl border border-white/[0.06] p-3" style={{ background: "var(--glass-card)" }}>
+          <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary">Rate Limits</span>
+          <div className="mt-2 space-y-2">
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[8px] font-mono text-txt-secondary">Session</span>
+                <span className="text-[8px] font-mono text-txt-tertiary tabular-nums">{sessionPct !== null ? `${sessionPct}%` : "\u2014"}</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${sessionPct ?? 0}%`, background: sessionPct !== null ? ringColor(sessionPct) : "transparent" }} />
+              </div>
+              {resetLabel && <span className="text-[7px] font-mono text-txt-tertiary">{resetLabel}</span>}
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-[8px] font-mono text-txt-secondary">Weekly</span>
+                <span className="text-[8px] font-mono text-txt-tertiary tabular-nums">{weeklyPct !== null ? `${weeklyPct}%` : "\u2014"}</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                <div className="h-full rounded-full transition-all duration-500" style={{ width: `${weeklyPct ?? 0}%`, background: weeklyPct !== null ? ringColor(weeklyPct) : "transparent" }} />
+              </div>
+            </div>
+
+            {/* Burn rate */}
+            {(() => {
+              const history = metrics.costHistory || [];
+              const tenMinAgo = Date.now() - 10 * 60 * 1000;
+              const recent = history.filter(h => new Date(h.timestamp).getTime() > tenMinAgo);
+              if (recent.length < 2) return (
+                <div className="flex items-center justify-between">
+                  <span className="text-[8px] font-mono text-txt-secondary">Burn Rate</span>
+                  <span className="text-[8px] font-mono text-txt-tertiary">{"\u2014"}</span>
+                </div>
+              );
+              const windowMs = new Date(recent[recent.length-1].timestamp).getTime() - new Date(recent[0].timestamp).getTime();
+              const windowMin = Math.max(windowMs / 60000, 1);
+              const totalTok = recent.reduce((s, h) => s + h.inputTokens + h.outputTokens, 0);
+              const tokPerMin = Math.round(totalTok / windowMin);
+              return (
+                <div className="flex items-center justify-between">
+                  <span className="text-[8px] font-mono text-txt-secondary">Burn Rate</span>
+                  <span className="text-[8px] font-mono text-amber-400 tabular-nums">{tokPerMin >= 1000 ? `${(tokPerMin/1000).toFixed(1)}k` : tokPerMin} tok/min</span>
+                </div>
+              );
+            })()}
+
+            {/* Projected time-to-limit */}
+            {(() => {
+              if (sessionPct === null || sessionPct >= 100) return null;
+              const history = metrics.costHistory || [];
+              const tenMinAgo = Date.now() - 10 * 60 * 1000;
+              const recent = history.filter(h => new Date(h.timestamp).getTime() > tenMinAgo);
+              if (recent.length < 2) return null;
+              const windowMs = new Date(recent[recent.length-1].timestamp).getTime() - new Date(recent[0].timestamp).getTime();
+              const windowMin = Math.max(windowMs / 60000, 1);
+              const totalCostInWindow = recent.reduce((s, h) => s + h.cost, 0);
+              const costPerMin = totalCostInWindow / windowMin;
+              if (costPerMin <= 0) return null;
+              const remainingPct = 100 - sessionPct;
+              const estMinutes = Math.round(remainingPct * (metrics.cost / sessionPct) / costPerMin);
+              const hrs = Math.floor(estMinutes / 60);
+              const mins = estMinutes % 60;
+              const label = hrs > 0 ? `~${hrs}h ${mins}m` : `~${mins}m`;
+              return (
+                <div className="flex items-center justify-between">
+                  <span className="text-[8px] font-mono text-txt-secondary">Time to Limit</span>
+                  <span className="text-[8px] font-mono text-red-400/80 tabular-nums">{label}</span>
+                </div>
+              );
+            })()}
+
+            {/* Rate limit event log */}
+            {(() => {
+              const events = (metrics.rateLimitHistory || []).slice(-10).reverse();
+              if (events.length === 0) return (
+                <div className="mt-1 pt-1 border-t border-white/[0.04]">
+                  <span className="text-[7px] font-mono text-txt-tertiary italic">No throttle events</span>
+                </div>
+              );
+              return (
+                <div className="mt-1 pt-1 border-t border-white/[0.04] space-y-0.5 max-h-[80px] overflow-y-auto">
+                  {events.map((ev, i) => (
+                    <div key={i} className="flex items-center justify-between">
+                      <span className="text-[7px] font-mono text-red-400/80">{ev.status}</span>
+                      <span className="text-[7px] font-mono text-txt-tertiary">{new Date(ev.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
