@@ -609,7 +609,7 @@ function CodeCard({ card, onLearnMore }: { card: FeedCard; onLearnMore?: () => v
 
   const copyPath = () => {
     const p = card.fullPath || card.filename || "";
-    navigator.clipboard.writeText(p.replace(/\//g, "\\"));
+    navigator.clipboard.writeText(p);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -779,7 +779,7 @@ function DiffModal({ card, onClose }: { card: FeedCard; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
 
   const copyPath = () => {
-    navigator.clipboard.writeText((card.fullPath || card.filename || "").replace(/\//g, "\\"));
+    navigator.clipboard.writeText(card.fullPath || card.filename || "");
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
