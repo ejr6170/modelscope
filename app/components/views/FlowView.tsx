@@ -270,6 +270,55 @@ export const ClaudeFlowContent = React.memo(function ClaudeFlowContent({ metrics
                   );
                 })}
               </svg>
+              {hoveredBar && (() => {
+                const tooltipW = 180;
+                const tooltipH = 130;
+                const containerW = timelineRef.current?.clientWidth || 300;
+                const color = modelColor(hoveredBar.model);
+                const left = Math.max(0, Math.min(hoveredBar.x + 4 - tooltipW / 2, containerW - tooltipW));
+                const top = Math.max(0, hoveredBar.y - tooltipH - 8);
+                const modelShort = hoveredBar.model.replace("claude-", "").replace(/-\d{8}$/, "");
+                return (
+                  <div style={{
+                    position: "absolute", left, top, width: tooltipW,
+                    background: "rgba(15, 15, 25, 0.95)",
+                    border: `1px solid ${color}4D`,
+                    borderRadius: 8, padding: "10px 12px",
+                    backdropFilter: "blur(12px)",
+                    boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+                    pointerEvents: "none", zIndex: 50,
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color, fontFamily: "monospace" }}>{modelShort}</span>
+                      <span style={{ fontSize: 9, color: "rgba(255,255,255,0.35)", fontFamily: "monospace" }}>{new Date(hoveredBar.timestamp).toLocaleTimeString()}</span>
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "white", fontFamily: "monospace", marginBottom: 8 }}>
+                      ${hoveredBar.cost.toFixed(4)}
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "3px 12px", fontSize: 9, fontFamily: "monospace" }}>
+                      {[
+                        ["in", hoveredBar.inputTokens],
+                        ["out", hoveredBar.outputTokens],
+                        ["cache r", hoveredBar.cacheRead],
+                        ["cache w", hoveredBar.cacheWrite],
+                      ].map(([label, val]) => (
+                        <React.Fragment key={label as string}>
+                          <span style={{ color: "rgba(255,255,255,0.4)" }}>{label}</span>
+                          <span style={{ color: "rgba(255,255,255,0.7)", textAlign: "right" }}>{(val as number).toLocaleString()}</span>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                    <div style={{
+                      position: "absolute", bottom: -5, left: "50%",
+                      width: 10, height: 10,
+                      background: "rgba(15, 15, 25, 0.95)",
+                      borderRight: `1px solid ${color}4D`,
+                      borderBottom: `1px solid ${color}4D`,
+                      transform: "translateX(-50%) rotate(45deg)",
+                    }} />
+                  </div>
+                );
+              })()}
             </div>
             <div className="flex items-center gap-3 mt-2">
               {[["opus", "rgb(129, 140, 248)"], ["sonnet", "rgb(34, 211, 238)"], ["haiku", "rgb(251, 191, 36)"]].map(([label, color]) => (
