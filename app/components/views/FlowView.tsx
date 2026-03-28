@@ -170,6 +170,11 @@ export const ClaudeFlowContent = React.memo(function ClaudeFlowContent({ metrics
 
   const timelineRef = useRef<HTMLDivElement>(null);
   const stickyRight = useRef(true);
+  const [hoveredBar, setHoveredBar] = useState<{
+    x: number; y: number; cost: number; model: string;
+    inputTokens: number; outputTokens: number;
+    cacheRead: number; cacheWrite: number; timestamp: string;
+  } | null>(null);
 
   useEffect(() => {
     const el = timelineRef.current;
@@ -249,17 +254,19 @@ export const ClaudeFlowContent = React.memo(function ClaudeFlowContent({ metrics
         return (
           <div className="rounded-xl border border-white/[0.06] p-3" style={{ background: "var(--glass-card)" }}>
             <span className="text-[7px] font-sans font-bold tracking-[0.2em] uppercase text-txt-tertiary">Cost Per Turn</span>
-            <div className="mt-2 overflow-x-auto" ref={timelineRef}>
+            <div className="mt-2 overflow-x-auto relative" ref={timelineRef}>
               <svg width={svgW} height={chartH} className="block">
                 {history.map((h, i) => {
                   const barH = Math.max((h.cost / maxCost) * (chartH - 20), 2);
                   const x = i * (barW + gap);
                   const y = chartH - barH;
                   return (
-                    <g key={i}>
-                      <title>{`${h.model}\n$${h.cost.toFixed(4)}\n${h.inputTokens} in / ${h.outputTokens} out\nCache: ${h.cacheRead} read / ${h.cacheWrite} write\n${new Date(h.timestamp).toLocaleTimeString()}`}</title>
-                      <rect x={x} y={y} width={barW} height={barH} rx={2} fill={modelColor(h.model)} opacity={0.8} className="hover:opacity-100 transition-opacity" />
-                    </g>
+                    <rect key={i} x={x} y={y} width={barW} height={barH} rx={2}
+                      fill={modelColor(h.model)} opacity={hoveredBar?.x === x ? 1 : 0.8}
+                      className="transition-opacity cursor-pointer"
+                      onMouseEnter={() => setHoveredBar({ x, y, cost: h.cost, model: h.model, inputTokens: h.inputTokens, outputTokens: h.outputTokens, cacheRead: h.cacheRead, cacheWrite: h.cacheWrite, timestamp: h.timestamp })}
+                      onMouseLeave={() => setHoveredBar(null)}
+                    />
                   );
                 })}
               </svg>
