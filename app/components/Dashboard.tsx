@@ -13,6 +13,8 @@ import { MonitorView } from "./views/MonitorView";
 import { StatusBar } from "./StatusBar";
 import { Sidebar, SessionPanel } from "./Sidebar";
 import { CommandBar } from "./CommandBar";
+import { useHardwareMetrics } from "./hooks/useHardwareMetrics";
+import { useAgentState } from "./hooks/useAgentState";
 
 function PinnedErrors({ errors, onDismiss }: { errors: PinnedError[]; onDismiss: (id: string) => void }) {
   if (!errors.length) return null;
@@ -38,72 +40,6 @@ const MAX_CARDS = 60;
 function createDefaultMetrics(): Metrics {
   return { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, turns: 0, toolCalls: 0, elapsed: 0, velocity: 0, startTime: Date.now(), hourlyTurns: 0, topFiles: [], errorCount: 0, activeSubagents: [], plan: undefined, modelBreakdown: [], usage: undefined };
 }
-
-function useHardwareMetrics() {
-  const [hardwareMetrics, setHardwareMetrics] = useState<HwMetrics | null>(null);
-  const [hardwareHistory, setHardwareHistory] = useState<HwMetrics[]>([]);
-
-  useEffect(() => {
-    const hwApi = (window as unknown as Record<string, Record<string, (...args: unknown[]) => void>>).electronAPI;
-    hwApi?.onHardwareMetrics?.((data: unknown) => {
-      const d = data as HwMetrics;
-      setHardwareMetrics(d);
-      setHardwareHistory(prev => {
-        const next = [...prev, d];
-        return next.length > 120 ? next.slice(-120) : next;
-      });
-    });
-    return () => { hwApi?.removeHardwareMetrics?.(); };
-  }, []);
-
-  return { hardwareMetrics, hardwareHistory };
-}
-
-function useAgentState(socketRef: React.RefObject<Socket | null>) {
-  const [completedAgents, setCompletedAgents] = useState<AgentNode[]>([]);
-  const [agentEvents, setAgentEvents] = useState<Record<string, SessionEvent[]>>({});
-
-  useEffect(() => {
-    const s = socketRef.current;
-    if (!s) return;
-
-    const onSubagentEvent = (ev: SessionEvent & { toolUseId?: string; agentId?: string }) => {
-      const agentKey = ev.toolUseId || ev.agentId || "";
-      if (agentKey) {
-        setAgentEvents(prev => {
-          const events = prev[agentKey] || [];
-          const updated = [...events, ev as SessionEvent];
-          return { ...prev, [agentKey]: updated.length > 50 ? updated.slice(-50) : updated };
-        });
-      }
-    };
-
-    const onSubagentEnd = (data: { id: string; type?: string; desc?: string; startTime?: string; result?: string; isError?: boolean }) => {
-      setCompletedAgents(prev => {
-        const next = [...prev, {
-          id: data.id, type: data.type || "", desc: data.desc || "",
-          startTime: data.startTime || new Date().toISOString(),
-          status: (data.isError ? "failed" : "done") as "active" | "done" | "failed",
-          result: data.result, isError: data.isError,
-        }];
-        return next.length > 50 ? next.slice(-50) : next;
-      });
-      setAgentEvents(prev => { const copy = { ...prev }; delete copy[data.id]; return copy; });
-    };
-
-    s.on("subagent_event", onSubagentEvent);
-    s.on("subagent_end", onSubagentEnd);
-    return () => { s.off("subagent_event", onSubagentEvent); s.off("subagent_end", onSubagentEnd); };
-  }, [socketRef]);
-
-  const resetAgentState = useCallback(() => {
-    setCompletedAgents([]);
-    setAgentEvents({});
-  }, []);
-
-  return { completedAgents, agentEvents, setAgentEvents, resetAgentState };
-}
-
 
 
 export default function Dashboard() {
